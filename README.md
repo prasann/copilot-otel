@@ -1,6 +1,16 @@
 ---
 title: GitHub Copilot OTEL Dashboard
 description: Provision Azure Monitor + Managed Grafana with azd, run a local OTEL collector, and view Copilot telemetry in dashboard 25053.
+ms.date: 2026-07-09
+ms.topic: how-to
+keywords:
+  - github-copilot
+  - opentelemetry
+  - azure-monitor
+  - application-insights
+  - grafana
+  - observability
+estimated_reading_time: 10
 ---
 
 ## Overview
@@ -24,7 +34,8 @@ Provisioned resources:
 ## 1. Provision Azure resources
 
 ```bash
-cd ~/dev/copilot-otel
+git clone https://github.com/YOUR-ORG/copilot-otel.git
+cd copilot-otel
 azd auth login            # if not already
 azd env new copilot-otel  # environment name is used to derive rg-<name>
 azd up                    # prompts for subscription + region on first run
@@ -132,3 +143,11 @@ azd down --purge
 ## Cost note
 
 Application Insights ingestion is billed per GB (~USD 2.30/GB after the 5 GB monthly free tier). Managed Grafana Standard is billed per active user hour. Run `azd down` when you are done experimenting.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

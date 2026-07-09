@@ -1,4 +1,19 @@
+# Azure Developer CLI environment (contains connection strings and secrets)
 .azure/
+
+# Environment files
 .env
 *.env
+*.env.local
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor directories and files
+.idea/
+.vscode/settings.json
+*.suo
+*.user
+
