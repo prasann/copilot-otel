@@ -1,0 +1,60 @@
+{
+  "annotations": { "list": [] },
+  "description": "Minimal single-table validation of branch token attribution. Resource is hardcoded so no template variables can interfere.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Raw join: hook mapping events -> copilot-chat token spans, grouped by repo + branch.",
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true }, "mappings": [], "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 18, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "cellHeight": "sm", "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false }, "showHeader": true },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\ndependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| summarize Tokens = sum(input_tokens) + sum(output_tokens), Input = sum(input_tokens), Output = sum(output_tokens), Sessions = dcount(session_key) by repo, branch\n| order by Tokens desc",
+            "resources": ["/subscriptions/ed1f1918-2165-4549-8356-ab1736f12fe8/resourceGroups/rg-copilot-otel/providers/microsoft.insights/components/appi-ua3pocmrlvo74"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens by Repo + Branch (validation)",
+      "type": "table"
+    }
+  ],
+  "preload": false,
+  "refresh": "",
+  "schemaVersion": 42,
+  "tags": ["copilot", "validation"],
+  "templating": {
+    "list": [
+      {
+        "current": { "text": "Azure Monitor", "value": "azure-monitor-oob" },
+        "label": "Data Source",
+        "name": "am_ds",
+        "options": [],
+        "query": "grafana-azure-monitor-datasource",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Copilot Branch Spend — Validation",
+  "uid": "CopilotBranchValidate",
+  "version": 1,
+  "weekStart": ""
+}

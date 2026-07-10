@@ -1,0 +1,406 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Attributes GitHub Copilot token spend to git branches and repos by joining hook mapping events (branch.session.start) to copilot-chat dependency spans on the shared session id (hook session.id == dependencies copilot_chat.chat_session_id).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Total tokens (input + output) attributed to the selected repo's branches over the selected time range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize ['Total Tokens'] = sum(input_tokens) + sum(output_tokens) by bin(timestamp, $__interval)\n| order by timestamp asc",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "time_series",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Distinct Copilot sessions attributed to the selected repo's branches.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize ['Sessions'] = dcount(session_key)",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Sessions",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Number of distinct branches with attributed token spend.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize ['Active Branches'] = dcount(branch)",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Active Branches",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "The single branch with the highest token spend in range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "orange" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Tokens" },
+            "properties": [{ "id": "unit", "value": "short" }]
+          }
+        ]
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize t = sum(input_tokens) + sum(output_tokens) by branch\n| top 1 by t\n| project ['Top Branch'] = branch, Tokens = t",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Branch",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Total tokens per branch, ranked. Top 15 branches by spend.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "continuous-BlPu" },
+          "mappings": [],
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient",
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "left",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize Tokens = sum(input_tokens) + sum(output_tokens) by branch\n| top 15 by Tokens\n| order by Tokens desc",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens by Branch",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+      "description": "Spotlight on the top 3 branches by spend: total tokens, input/output split, sessions, and the model that consumed the most tokens.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "teal" },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Model" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+          }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 13 },
+      "id": 6,
+      "maxPerRow": 3,
+      "repeat": "topbranch",
+      "repeatDirection": "h",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.4.3",
+      "targets": [
+        {
+          "azureLogAnalytics": {
+            "dashboardTime": true,
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\nlet sel = calls | where branch == '${topbranch:raw}';\nlet topModel = sel | summarize s = sum(input_tokens + output_tokens) by model | top 1 by s | project Model = model, k = 1;\nsel\n| summarize Tokens = sum(input_tokens) + sum(output_tokens), Input = sum(input_tokens), Output = sum(output_tokens), Sessions = dcount(session_key)\n| extend k = 1\n| join kind=leftouter topModel on k\n| project Tokens, Input, Output, Sessions, Model",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table",
+            "timeColumn": "timestamp"
+          },
+          "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        }
+      ],
+      "title": "$topbranch",
+      "type": "stat"
+    }
+  ],
+  "preload": false,
+  "refresh": "",
+  "schemaVersion": 42,
+  "tags": ["github-copilot", "copilot", "tokens", "branch-attribution", "opentelemetry"],
+  "templating": {
+    "list": [
+      {
+        "current": { "text": "Azure Monitor", "value": "azure-monitor-oob" },
+        "label": "Data Source",
+        "name": "am_ds",
+        "options": [],
+        "query": "grafana-azure-monitor-datasource",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": { "text": "prasanna-trials-sub", "value": "ed1f1918-2165-4549-8356-ab1736f12fe8" },
+        "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "azure-monitor-oob" },
+        "definition": "",
+        "description": "Subscription of the Application Insights",
+        "includeAll": false,
+        "label": "Subscription",
+        "name": "sub",
+        "options": [],
+        "query": {
+          "grafanaTemplateVariableFn": { "kind": "SubscriptionsQuery", "rawQuery": "subscriptions()" },
+          "queryType": "Azure Subscriptions",
+          "refId": "A"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 5,
+        "type": "query"
+      },
+      {
+        "current": { "text": "rg-copilot-otel", "value": "rg-copilot-otel" },
+        "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+        "definition": "",
+        "label": "Resource Group",
+        "name": "rg",
+        "options": [],
+        "query": {
+          "azureResourceGraph": { "query": "resources\n| where type =~ \"microsoft.insights/components\"\n| project resourceGroup" },
+          "queryType": "Azure Resource Graph",
+          "refId": "A",
+          "subscriptions": ["$sub"]
+        },
+        "refresh": 1,
+        "regex": "",
+        "type": "query"
+      },
+      {
+        "current": { "text": "appi-ua3pocmrlvo74", "value": "appi-ua3pocmrlvo74" },
+        "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "azure-monitor-oob" },
+        "definition": "",
+        "label": "Application Insights",
+        "name": "res",
+        "options": [],
+        "query": {
+          "namespace": "microsoft.insights/components",
+          "queryType": "Azure Resource Names",
+          "refId": "A",
+          "resourceGroup": "$rg",
+          "subscription": "$sub"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 5,
+        "type": "query"
+      },
+      {
+        "current": { "text": "All", "value": "$__all" },
+        "allValue": "All",
+        "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+        "definition": "Repos with attributed Copilot spend",
+        "includeAll": true,
+        "label": "Repo",
+        "name": "repo",
+        "options": [],
+        "query": {
+          "azureLogAnalytics": {
+            "query": "traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(repo)\n| distinct repo\n| order by repo asc",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table"
+          },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 5,
+        "type": "query"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "grafana-azure-monitor-datasource", "uid": "${am_ds}" },
+        "definition": "Top 3 branches by token spend",
+        "includeAll": false,
+        "label": "Top Branches",
+        "multi": true,
+        "name": "topbranch",
+        "options": [],
+        "query": {
+          "azureLogAnalytics": {
+            "query": "let branchMap = traces\n| where tostring(customDimensions[\"event\"]) == \"branch.session.start\"\n| extend session_key = tostring(customDimensions[\"session.id\"]), branch = tostring(customDimensions[\"branch.id\"]), repo = tostring(customDimensions[\"repo.name\"])\n| where isnotempty(branch)\n| summarize arg_max(timestamp, branch, repo) by session_key;\nlet calls = dependencies\n| where tostring(customDimensions[\"service.name\"]) == \"copilot-chat\"\n| extend session_key = tostring(customDimensions[\"copilot_chat.chat_session_id\"]), input_tokens = toint(customDimensions[\"gen_ai.usage.input_tokens\"]), output_tokens = toint(customDimensions[\"gen_ai.usage.output_tokens\"]), model = tostring(customDimensions[\"gen_ai.response.model\"])\n| where isnotempty(session_key) and isnotempty(model)\n| join kind=inner branchMap on session_key\n| where '${repo:raw}' == 'All' or repo == '${repo:raw}';\ncalls\n| summarize Tokens = sum(input_tokens) + sum(output_tokens) by branch\n| top 3 by Tokens\n| project branch",
+            "resources": ["/subscriptions/$sub/resourceGroups/$rg/providers/microsoft.insights/components/$res"],
+            "resultFormat": "table"
+          },
+          "queryType": "Azure Log Analytics",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 0,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-7d", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Copilot Spend by Branch",
+  "uid": "CopilotBranchSpend",
+  "version": 1,
+  "weekStart": ""
+}
