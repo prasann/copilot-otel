@@ -28,7 +28,7 @@ Provisioned resources:
 
 Beyond raw telemetry, this project supports attributing each Copilot session, and the tokens it consumes, to the work item (git branch) it was spent on. This answers questions like "how many tokens did branch `feature/login` cost?" across VS Code Copilot Chat and the Copilot CLI, even with several projects open at once.
 
-Rather than tagging telemetry globally at the collector (which cannot represent two concurrent sessions), the design keeps two concerns separate: a system-wide Copilot hook emits a lightweight `session -> story` mapping event at each session boundary, and the dashboard joins that mapping to the Copilot telemetry at query time in KQL. The two sides never call each other directly; they meet only at a versioned contract, the shape of the OTLP mapping event. See [docs/session-story-attribution-plan.md](docs/session-story-attribution-plan.md) for the full design, KQL join, and opt-out controls.
+Rather than tagging telemetry globally at the collector (which cannot represent two concurrent sessions), the design keeps two concerns separate: a system-wide Copilot hook emits a lightweight `session -> story` mapping event at each session boundary, and the dashboard joins that mapping to the Copilot telemetry at query time in KQL. The two sides never call each other directly; they meet only at a versioned contract, the shape of the OTLP mapping event. The producer side lives in a separate hooks repo; see [emit-mapping.sh](https://github.com/prasann/agent-box/blob/main/vscode-prompts/.github/hooks/scripts/emit-mapping.sh) for the emitter and [docs/session-story-attribution-plan.md](docs/session-story-attribution-plan.md) for the full design, KQL join, and opt-out controls.
 
 ```mermaid
 flowchart LR
