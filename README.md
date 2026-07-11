@@ -24,6 +24,25 @@ Provisioned resources:
 * Azure Managed Grafana (Standard, system-assigned identity)
 * Role assignments: `Monitoring Reader` for the Grafana MSI on the resource group, `Grafana Admin` for the deploying user
 
+## Session-to-story attribution
+
+Beyond raw telemetry, this project supports attributing each Copilot session, and the tokens it consumes, to the work item (git branch) it was spent on. This answers questions like "how many tokens did branch `feature/login` cost?" across VS Code Copilot Chat and the Copilot CLI, even with several projects open at once.
+
+Rather than tagging telemetry globally at the collector (which cannot represent two concurrent sessions), the design keeps two concerns separate: a system-wide Copilot hook emits a lightweight `session -> story` mapping event at each session boundary, and the dashboard joins that mapping to the Copilot telemetry at query time in KQL. The two sides never call each other directly; they meet only at a versioned contract, the shape of the OTLP mapping event. See [docs/session-story-attribution-plan.md](docs/session-story-attribution-plan.md) for the full design, KQL join, and opt-out controls.
+
+```mermaid
+flowchart LR
+  subgraph HR["Hooks repo (~/.copilot/hooks)"]
+    H[sessionStart / sessionEnd<br/>VS Code + CLI] --> S[emit-mapping.sh]
+  end
+  subgraph CR["copilot-otel repo"]
+    C[collector :4318] --> AI[(App Insights)]
+    AI --> G[Grafana: tokens per branch / repo]
+  end
+  Cop[Copilot telemetry] --> C
+  S -->|OTLP log event = the contract| C
+```
+
 ## Prerequisites
 
 * [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) 1.25+
