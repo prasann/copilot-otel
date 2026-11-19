@@ -13,6 +13,18 @@ keywords:
 estimated_reading_time: 10
 ---
 
+> **Modernization plan pending approval:** Start with [PLAN.md](PLAN.md) and its
+> [editable architecture](docs/architecture.excalidraw). The primary goal is now
+> daily, evidence-backed reflection on finished VS Code/Copilot app sessions,
+> using protected local history. Metadata-only telemetry is a separate supporting
+> pipeline. Model selection and real-content inference remain blocked pending
+> evaluation and approval. Nothing in that plan is implemented yet.
+> Validate feasibility using the bounded experiments in [SPIKES.md](SPIKES.md),
+> starting with passive VS Code capture and explicit completion detection.
+> The instructions below describe the legacy deployment; running `azd up`
+> still provisions dedicated Managed Grafana Standard and does not implement
+> the proposed architecture.
+
 ## Overview
 
 This project provisions the Azure side of the Copilot observability stack and configures a local OpenTelemetry collector that forwards VS Code and Copilot CLI telemetry to Application Insights. It uses `azd` for infrastructure and Docker for the collector.

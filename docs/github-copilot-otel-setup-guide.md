@@ -1,4 +1,9 @@
 # GitHub Copilot OpenTelemetry Setup Guide
+
+> **Legacy setup:** These steps describe the previous Docker-based integration,
+> including old client settings and content capture. Review [the modernization
+> plan](../PLAN.md) before using them. The replacement is planned, not implemented.
+
 **Goal:** Collect telemetry from GitHub Copilot (VS Code + CLI) and send to Azure Application Insights
 
 ---

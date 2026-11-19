@@ -13,6 +13,11 @@ keywords:
 estimated_reading_time: 12
 ---
 
+> **Legacy design:** This document records the previous query-time correlation
+> approach. The proposed replacement is [the modernization plan](../PLAN.md),
+> which makes reliable pre-storage project attribution an explicit approval gate.
+> Do not implement this document as the new architecture.
+
 ## Goal
 
 Attribute each GitHub Copilot session, and the tokens it consumes, to the work item
