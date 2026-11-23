@@ -6,13 +6,18 @@ Real-content inference and deployment remain separately approval-gated.**
 This plan supersedes the telemetry-first proposal. The main goal is a passive,
 daily reflection on coding-agent work, starting with new sessions on this Mac.
 Telemetry is a separate supporting pipeline, not a proxy for productivity.
-Native client runtime configuration remains unchanged. The repo's `azd` template
+VS Code Insiders metadata export is now configured application-wide, with
+content/identity capture off; activation requires a window reload and a real
+native-record check. The repo's `azd` template
 has deployed the Entra-authenticated monitoring baseline and initial portal
 Grafana panels, without dedicated Managed Grafana. One synthetic Azure model
 smoke request succeeded; the publisher is synthetic-only. A native macOS collector
 and Entra-only OTLP path now pass synthetic filtering and Azure query-back checks.
-Real-client configuration, verified native accounting/attribution, browser
-rendering, scheduling, and real-content approval remain pending.
+Browser rendering is user-verified. Native accounting/attribution, read-only
+archived-session capture, and scheduling remain pending. Metadata collection is
+approved for all projects; Azure content analysis is approved only for new
+`personal/copilot-otel` archived sessions at 09:00 local time, with no backfill.
+That approval does not mean the daily worker is installed.
 See the [pilot checklist](specs/session-reflection/tasks.md) and
 [Azure setup checklist](docs/azure-setup.md). The working-pilot rollout uses basic
 connection checks first; the larger model comparison is deferred, not passed.
@@ -275,12 +280,12 @@ Use a direct inference API unless the SDK solves a demonstrated need. SDK use do
 not make inference local. Exclude evaluator jobs and their usage from measured
 coding sessions, and never recursively ingest generated reports.
 
-Before real-content inference, compare local and Azure candidates on the same
-synthetic fixtures: evidence accuracy, appropriate unknowns, task segmentation,
-schema validity, latency, resource requirements, and estimated cost. Then approve
-one initial provider and a small allowed-project pilot. Calibration needs occasional
-review, not daily user labeling. Broader rollout requires useful, supported
-conclusions rather than merely valid JSON.
+The user deferred the full local-versus-Azure comparison in favor of a basic
+working pilot. One synthetic Azure smoke and manual review are complete, not
+quality certification. The existing Azure GPT-5 mini provider is now approved
+only for new archived `personal/copilot-otel` sessions. Broader content rollout
+still requires useful, supported conclusions rather than merely valid JSON.
+Calibration needs occasional review, not daily user labeling.
 
 ## 7. Telemetry project attribution: a separate gate
 

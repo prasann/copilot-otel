@@ -1,9 +1,9 @@
 {
   "uid": "copilot-reflection-pilot",
   "title": "Copilot reflection and telemetry - pilot",
-  "description": "Derived assessments and collection status. Synthetic smoke rows are labelled; real client collection and token accounting are not enabled yet.",
+  "description": "Derived assessments and filtered native telemetry. Project attribution and usage accounting remain unverified; raw spans are not usage totals.",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "timezone": "browser",
   "time": {"from": "now-7d", "to": "now"},
@@ -37,7 +37,7 @@
       "gridPos": {"x": 0, "y": 0, "w": 24, "h": 4},
       "options": {
         "mode": "markdown",
-        "content": "### Synthetic smoke pilot\nAssessment rows labelled `synthetic_azure_model_smoke` are test fixtures, not real project work. Model inference and synthetic native OTLP ingestion are connected; real-client collection and daily scheduling are **not enabled**. Only reviewed derived summaries are published. Project IDs will use `personal/project` or `msft/project`; `synthetic/demo` is reserved for smoke tests. The time picker filters **assessment creation time** for assessments and span start time for telemetry."
+        "content": "### Continuous metadata pilot\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics. Project attribution and the native accounting layer are **not verified**: incoming spans remain `unattributed` and must not be summed as usage totals.\n\nArchived-conversation analysis is approved only for `personal/copilot-otel`, once daily at **09:00 local time**, for new sessions with no backfill. The capture/analysis worker is **not installed yet**. This is separate from continuous telemetry. The time picker filters assessment creation time and span start time; this text is not a live health signal."
       }
     },
     {
@@ -57,7 +57,7 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
+            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
           }
         }
       ]
@@ -78,24 +78,24 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastAssessment=max(TimeGenerated), EligibleRowsVisible=count() by ProjectId, Origin\n| extend MinutesSinceAssessment=datetime_diff('minute', now(), LastAssessment)\n| order by LastAssessment desc"
+            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastAssessment=max(TimeGenerated), EligibleRowsVisible=count() by ProjectId, Origin\n| extend MinutesSinceAssessment=datetime_diff('minute', now(), LastAssessment)\n| order by LastAssessment desc"
           }
         }
       ]
     },
     {
       "id": 4,
-      "title": "Usage and reliability - not collecting yet",
+      "title": "Usage and reliability - not collecting verified totals",
       "type": "text",
       "gridPos": {"x": 12, "y": 13, "w": 12, "h": 7},
       "options": {
         "mode": "markdown",
-        "content": "Real-client collection: **not enabled**. A native macOS collector installer and synthetic OTLP connection check are available.\n\nReal project-level tokens, latency, errors, and delivery health are **unavailable**, not zero. They require a controlled client sample proving workspace identity and the correct accounting layer.\n\nThe model test's inference tokens are excluded. The connection-check panel below contains deliberately authored synthetic counts, not real coding usage. Neither assessment nor trace freshness proves the collector is currently healthy. This text is a rollout boundary, not a live process-status signal."
+        "content": "The background collector runs continuously. Reload VS Code Insiders to activate its global metadata export; no prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\nThe table below shows individual incoming spans, not validated usage totals. Invocation and model-call spans may overlap, so their token counts must not be summed. Project labels remain `unattributed` until native workspace identity is verified; selecting a named project cannot recover missing labels.\n\nLast trace time indicates data freshness, not current process health. Daily conversation analysis remains a separate, not-yet-installed worker."
       }
     },
     {
       "id": 5,
-      "title": "Synthetic OTLP connection check - not real usage",
+      "title": "Incoming telemetry - raw spans, not usage totals",
       "type": "table",
       "gridPos": {"x": 0, "y": 20, "w": 24, "h": 7},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
@@ -109,7 +109,7 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'synthetic_collector_smoke'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastTrace=max(TimeGenerated), Spans=count(), InputTokens=sum(tolong(Attributes['gen_ai.usage.input_tokens'])), OutputTokens=sum(tolong(Attributes['gen_ai.usage.output_tokens'])), CacheReadTokens=sum(tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])) by ProjectId\n| extend Status='Synthetic connection check; not coding usage'\n| order by LastTrace desc"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
           }
         }
       ]

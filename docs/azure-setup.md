@@ -218,10 +218,15 @@ events automatically and is not approved for real histories.
 
 Open the Application Insights resource > **Dashboards with Grafana** after
 provisioning. The deployed dashboard is tagged for that gallery and includes
-assessment-summary/freshness panels, a labelled synthetic OTLP connection check,
-and an explicit "not collecting yet" real-usage status. The connection check
-shows authored counts (100 input, 20 output, 10 cache-read tokens), not a model
-call or real coding-session usage. [The JSON definition](../dashboards/copilot-pilot.json) is deployed through
+assessment-summary/freshness panels and an incoming native-span table with an
+explicit unverified-accounting status. The earlier synthetic assessment and two
+trace spans were deleted through Azure's Delete Data API and query-verified absent,
+not merely hidden. One service-name-only resource lookup row remains: Azure
+rejected its ID filter and an exact timestamp filter matched zero underlying
+records. It contains no prompts, token counts, or conversation data.
+This API removes records from query results but does not physically
+erase their storage before retention expiry.
+[The JSON definition](../dashboards/copilot-pilot.json) is deployed through
 the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resource
 (`2025-09-01-preview`), not unsupported properties on the parent. Browser rendering
 and datasource selection still require a portal check. See the

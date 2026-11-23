@@ -22,7 +22,17 @@ storage. Real-history model inference requires separate approval.
   have been checked through Azure CLI. Visual rendering remains a user check.
 - A native macOS collector and Entra-authenticated OTLP ingestion path are
   installed on the pilot Mac; synthetic privacy checks and Azure query-back pass.
-  No Copilot clients, real-history inference, or daily worker are enabled.
+  VS Code Insiders global metadata export is configured; a window reload and
+  real-client verification are pending. Content and identity capture stay off.
+- The synthetic assessment and two spans were deleted and query-verified absent;
+  their local generated files were removed without resetting the model budget.
+  One resource lookup row containing only `service.name=copilot-otel` remains
+  after Azure rejected its ID filter and matched zero rows by exact timestamp.
+  It contains no token counts or conversation data and is not shown in the dashboard.
+  Incoming real spans have a separate table, not summed as verified usage.
+- Daily analysis is approved for new archived `personal/copilot-otel` sessions
+  at 09:00 local time. The capture/analysis worker is **not installed yet**;
+  approval is not an active schedule or permission to analyze other projects.
 
 See [PLAN.md](PLAN.md) for the architecture,
 [SPIKES.md](SPIKES.md) for feasibility evidence, and
@@ -42,7 +52,7 @@ The existing [azure.yaml](azure.yaml) uses [Bicep](infra/main.bicep) to create:
 | Workspace-based Application Insights | Entra-only application reference for native OTLP traces |
 | Telemetry collection endpoint and rule | Acknowledged OTLP HTTP ingestion into the same workspace |
 | Assessment table and direct data collection rule | Typed derived-summary ingestion; 90-day table retention |
-| Azure Monitor Grafana dashboard and definition | Summary/freshness panels, synthetic OTLP check, and explicit missing real-usage status |
+| Azure Monitor Grafana dashboard and definition | Summary/freshness panels, incoming metadata spans, and explicit unverified-accounting status |
 | Scoped role assignments | Pilot user can read data/dashboard and publish to the assessment and telemetry rules |
 
 No Azure OpenAI/model deployment, API keys, app registrations, Docker hosts, or
@@ -147,11 +157,16 @@ metadata and prohibited-content canaries. Retry only query-back if ingestion is
 still propagating; do not resend to work around query lag.
 
 The receiver listens only on `127.0.0.1:4318` (HTTP traces); health is on
-`127.0.0.1:13133`, collector metrics on `127.0.0.1:8888`. Names, scope/resource
+`127.0.0.1:13133`, collector metrics on `127.0.0.1:8888`. Client logs and aggregate
+metrics are deliberately discarded before persistence/upload; only traces go
+to Azure. Names, scope/resource
 strings, schemas, status text, events, links, and non-allowlisted attributes are
 removed or normalized before persistence/upload. Token counts must be nonnegative
-integers; model labels are bounded identifiers, not arbitrary strings. Native
-accounting/project identity is still unverified and defaults to unattributed.
+integers; model labels are bounded identifiers, not arbitrary strings. Only
+known operation labels and UUID-shaped conversation IDs may also survive.
+Native accounting/project identity is still unverified and defaults to
+unattributed. Invocation and model-call spans may overlap: the dashboard displays
+individual spans rather than summing their tokens.
 
 The standard OTLP HTTP exporter uses Azure CLI identity only, with no keys or
 stored bearer tokens. Its queue holds up to 128 requests in a database capped at
@@ -176,6 +191,39 @@ and not yet rotated; inspect `logs/collector.stderr.log` there for delivery
 errors. Collector health means local availability, not Azure delivery. An expired
 CLI login requires `az login`; no alternate credential type is used.
 The LaunchAgent runs after user login, not as a system-wide daemon.
+
+### Connect VS Code Insiders
+
+The pilot Mac's user settings now contain the following application-wide settings.
+They apply to all projects, as approved, not just this repository:
+
+```json
+{
+  "github.copilot.chat.otel.enabled": true,
+  "github.copilot.chat.otel.exporterType": "otlp-http",
+  "github.copilot.chat.otel.protocol": "http/json",
+  "github.copilot.chat.otel.otlpEndpoint": "http://127.0.0.1:4318",
+  "github.copilot.chat.otel.captureContent": false,
+  "github.copilot.chat.otel.captureIdentity": false,
+  "github.copilot.chat.otel.outfile": "",
+  "github.copilot.chat.otel.dbSpanExporter.enabled": false
+}
+```
+
+Run **Developer: Reload Window**, then use a new Copilot session normally.
+Reload other open Insiders windows as needed. Do not copy any legacy content-on
+settings or set a collector-wide project tag. Environment/enterprise overrides
+can take precedence over these personal settings; actual native records must
+still be checked. Standalone CLI, Stable, and desktop clients are not configured
+by this change.
+
+Telemetry streams as the client exports batches; Azure query visibility can lag
+by several minutes. Dashboard refresh is five minutes and is not an analysis run.
+Project filters cannot classify spans that are still labelled `unattributed`.
+Daily archived-conversation analysis is a separate planned 09:00 local job, not
+continuous model inference. That worker and its retention/deduplication still
+need implementation. The current content-analysis approval remains limited to
+new `personal/copilot-otel` sessions, with no historical backfill.
 
 ## Deployment validation
 

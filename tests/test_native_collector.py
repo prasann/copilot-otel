@@ -142,14 +142,25 @@ class NativeCollectorTests(unittest.TestCase):
             config["service"]["extensions"] = []
             config["service"]["telemetry"]["metrics"]["level"] = "none"
             config["exporters"] = {"file": {"path": str(root / "output.json")}}
-            config["service"]["pipelines"]["traces"]["exporters"] = ["file"]
+            for pipeline in config["service"]["pipelines"].values():
+                pipeline["exporters"] = ["file"]
             config_path = root / "collector.json"
             config_path.write_text(json.dumps(config))
             opener = urllib.request.urlopen
 
             def redirect(request: urllib.request.Request, timeout: int):
+                payload = json.loads(request.data)
+                spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
+                spans[0]["attributes"].extend([
+                    {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
+                    {"key": "gen_ai.conversation.id", "value": {"stringValue": "0123456789abcdef0123456789abcdef"}},
+                ])
+                spans[1]["attributes"].extend([
+                    {"key": "gen_ai.operation.name", "value": {"stringValue": "SYNTHETIC_OPERATION_MUST_DISAPPEAR"}},
+                    {"key": "gen_ai.conversation.id", "value": {"stringValue": "SYNTHETIC_CONVERSATION_MUST_DISAPPEAR"}},
+                ])
                 return opener(urllib.request.Request(
-                    f"http://127.0.0.1:{port}/v1/traces", data=request.data,
+                    f"http://127.0.0.1:{port}/v1/traces", data=json.dumps(payload).encode(),
                     headers={"Content-Type": "application/json"}, method="POST",
                 ), timeout=timeout)
 
@@ -172,6 +183,22 @@ class NativeCollectorTests(unittest.TestCase):
                 with patch.object(collector, "ROOT", root), \
                         patch.object(collector.urllib.request, "urlopen", side_effect=redirect):
                     receipt = collector.smoke()
+                for signal, payload in (
+                    ("logs", {"resourceLogs": [{"scopeLogs": [{"logRecords": [{
+                        "timeUnixNano": str(time.time_ns()),
+                        "body": {"stringValue": "SYNTHETIC_LOG_MUST_DISAPPEAR"},
+                    }]}]}]}),
+                    ("metrics", {"resourceMetrics": [{"scopeMetrics": [{"metrics": [{
+                        "name": "SYNTHETIC_METRIC_MUST_DISAPPEAR",
+                        "gauge": {"dataPoints": [{"timeUnixNano": str(time.time_ns()), "asInt": "1"}]},
+                    }]}]}]}),
+                ):
+                    with opener(urllib.request.Request(
+                        f"http://127.0.0.1:{port}/v1/{signal}",
+                        data=json.dumps(payload).encode(),
+                        headers={"Content-Type": "application/json"}, method="POST",
+                    ), timeout=10) as response:
+                        self.assertEqual(response.status, 200)
             finally:
                 process.terminate()
                 _, errors = process.communicate(timeout=10)
@@ -189,6 +216,9 @@ class NativeCollectorTests(unittest.TestCase):
                 if span["spanId"] == receipt["span_ids"][0]:
                     self.assertEqual(attributes["gen_ai.usage.input_tokens"], {"intValue": "100"})
                     self.assertEqual(attributes["gen_ai.usage.output_tokens"], {"intValue": "20"})
+                    self.assertEqual(attributes["gen_ai.operation.name"], {"stringValue": "chat"})
+                    self.assertEqual(attributes["gen_ai.conversation.id"],
+                                     {"stringValue": "0123456789abcdef0123456789abcdef"})
                 else:
                     self.assertFalse(any(key.startswith("gen_ai.") for key in attributes))
 
