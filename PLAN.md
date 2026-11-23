@@ -1,14 +1,17 @@
 # Personal Copilot reflection and observability
 
-**Status: draft for approval. No implementation or deployment is authorized.**
+**Status: direction approved for bounded development and synthetic evaluation.
+Real-content inference and deployment remain separately approval-gated.**
 
 This plan supersedes the telemetry-first proposal. The main goal is a passive,
 daily reflection on coding-agent work, starting with new sessions on this Mac.
 Telemetry is a separate supporting pipeline, not a proxy for productivity.
 Existing runtime configuration and infrastructure remain unchanged.
 
-Feasibility work is defined in [SPIKES.md](SPIKES.md). Start with passive VS Code
-capture and explicit completion detection; no spike has run or passed yet.
+Feasibility work is defined in [SPIKES.md](SPIKES.md). S1/S2 have scoped
+[synthetic VS Code findings](docs/spikes/session-capture-findings.md): local
+capture and explicit archive work. Restart/concurrency remain implementation
+acceptance tests rather than make-or-break feasibility blockers.
 Implementation remains gated on demonstrated feasibility, not documentation alone.
 
 ## 1. Purpose and boundaries
@@ -34,7 +37,7 @@ a task can span sessions. Do not equate session counts with completed tasks.
 
 | Concern | Proposed decision |
 | --- | --- |
-| Primary experience | Local daily report with evidence, uncertainties, and actionable patterns; readable from VS Code without invoking CLI Chronicle. |
+| Primary experience | One authenticated Grafana dashboard combining derived assessments and OTel telemetry, with shared project/time filters. Read whenever useful; daily analysis does not require daily reading. |
 | Repository ownership | `copilot-otel` owns capture adapters, batch assessment, local data lifecycle, and telemetry. `agent-box` owns reusable skills, agents, and personal hook registration. |
 | Capture | Reuse native local history first. Prove coverage and lifecycle semantics before choosing any adapter or editor extension. |
 | Eligible sessions | **User-selected:** explicit completion/archive only; defer sessions without reliable evidence. No idle-time closure heuristic. |
@@ -64,11 +67,13 @@ flowchart LR
     Content[("Protected local snapshots + manifest<br/>content: 30 days")]
     Batch["Daily batch worker<br/>explicitly finished revisions only<br/>deterministic facts + bounded model assessment"]
     Reports[("Local assessments + daily report<br/>90 days; evidence + unknowns")]
-    Review["Read in VS Code<br/>optional integration later"]
+    Review["Local preview / offline fallback<br/>not a separate required reading workflow"]
+    Publish["Assessment publisher<br/>allowlisted derived findings only"]
     Schedule["launchd daily schedule<br/>catch up after wake/login"]
     Sources --> Native
     Native --> Capture --> Content --> Batch --> Reports --> Review
     Schedule -. triggers .-> Batch
+    Reports --> Publish
     Collector["Native OTel Collector<br/>project accounting + metadata allowlist"]
     Queue[("Disk-backed telemetry queue")]
     Sources -->|"OTLP metadata only; verified clients"| Collector
@@ -76,18 +81,22 @@ flowchart LR
   end
   subgraph Azure["Personal Azure subscription"]
     Ingest["OTLP ingestion + Azure Monitor"]
-    Dashboards["Portal Grafana<br/>usage, latency, errors, delivery health"]
+    Findings["Azure assessment storage<br/>schema and datasource to validate"]
+    Dashboards["ONE authenticated Grafana dashboard<br/>assessments + operational telemetry<br/>shared project and time filters"]
     Ingest --> Dashboards
+    Findings --> Dashboards
   end
   Queue -->|"batch uploads; retry transient failures"| Ingest
+  Publish -->|"derived summaries; no prompts/chats/tool payloads"| Findings
   Decision["Model execution BLOCKED pending decision<br/>synthetic local vs Azure comparison first"]
   Decision -. gates model step .-> Batch
 ```
 
 Editable overview: [architecture.excalidraw](docs/architecture.excalidraw).
 The model's location is deliberately not drawn as a deployed service. Choosing
-Azure later requires a separate content-egress decision. Raw sessions and reports
-do not flow through OTel or Grafana. No local observability stack, cloud collector
+Azure later requires a separate model-input content-egress decision. Raw sessions
+and detailed local evidence do not flow through OTel or Grafana. Only approved
+derived assessment fields are published for the unified dashboard. No local observability stack, cloud collector
 VM, custom dashboard app, or VS Code extension is needed by default.
 
 ## 4. Capture strategy: native first, extension only for a proven gap
@@ -102,6 +111,13 @@ Official documentation reviewed on 2026-11-19 establishes these starting points:
 | Copilot desktop app, local sessions | Full session records under the Copilot session-state directory and a local SQLite subset | Actual paths/configuration, format versions, archive/terminal semantics, and overlap with sessions also visible in VS Code |
 | Copilot CLI | Same documented family of local records and index | Optional adapter compatibility; no dependency on interactive CLI usage |
 | Cloud/remote sessions | May be queryable through synced history, depending on client and policy | No assumption of a complete local transcript; defer until a supported access path and privacy policy are approved |
+
+The 2026-11-23 synthetic tests exercised VS Code's core Agent Host Copilot
+participant. This path uses a host catalog, a per-session database with an
+explicit SDK identity mapping, and native runtime event files. Archive state is
+in the host catalog, not the runtime history index. See the
+[tested capture contract and limitations](docs/spikes/session-capture-findings.md)
+before selecting an adapter; other harnesses/client versions remain unproven.
 
 VS Code's documented local indexing default is on and experimental history sync
 default is off. App/CLI documentation describes default syncing. Do not infer this
@@ -214,10 +230,34 @@ The daily report contains:
 - One suggested experiment or instruction change, never applied automatically.
 - A clearly separated telemetry summary only where matching coverage is verified.
 
-Start with local structured JSON and a readable Markdown report outside Git,
-openable in VS Code. No bespoke web UI or scoring dashboard initially. Assessments
+Start with local structured JSON and a readable Markdown preview outside Git for
+the feasibility pilot. The target reading experience is one Grafana dashboard,
+not separate report and telemetry destinations. No bespoke web UI or scoring dashboard initially. Assessments
 must remain useful without OTel; do not make a timestamp/project guess to connect
 unmatched telemetry. Optional linking requires a verified shared identifier.
+
+### Unified Grafana reading experience
+
+- Publish concise derived assessment summaries, friction patterns, recommendations,
+  uncertainty, and coverage alongside project/model usage, latency, errors, and
+  delivery health in the same dashboard. Use common project/time filters.
+- Analysis runs daily; viewing is on demand over a week, month, or selected period.
+  Distinguish session/work timestamps from assessment timestamps. Period totals
+  must exclude superseded revisions and avoid counting daily summaries twice.
+- Keep prompts, chat replies, code, tool payloads, and evidence excerpts local.
+  Publish opaque evidence/session references only; local references will not
+  resolve on another device. This keeps the dashboard compact as well as limiting
+  content egress.
+- Assessment publishing is a separate allowlisted path from metadata-only OTel.
+  Both feed the same Grafana experience; they need not share an ingestion format
+  or physical store. Grafana displays data rather than storing the assessments.
+- Validate narrative rendering, shared filters, datasource support, retention,
+  and authenticated access in the proposed Azure portal Grafana experience before
+  promising that implementation. A portal limitation requires a reviewed hosting
+  decision, not a silent fallback to a separate reporting application.
+- Require Entra authentication and least-privilege RBAC; no anonymous sharing.
+  Subscription ownership alone is not an access-control policy. Actual field
+  schema, storage, permissions, and deployment costs remain approval-gated.
 
 The assessor has no shell, file-editing, network-fetch, MCP, or deployment tools.
 Only a bounded input snapshot and the chosen inference endpoint are available.
@@ -385,8 +425,10 @@ and show expired-before-processing counts. Deletion/exclusion must invalidate
 queued work and remove this system's owned copies/results when explicitly
 requested; it does not automatically delete native, synced, or backup copies.
 No new GitHub sync, raw-content backup/upload, or Azure model access is implied.
-Even derived findings can reveal project details; cloud export needs a separate
-field allowlist and approval. Existing client sync is a separate policy to inspect.
+Derived findings are intended for the unified private Grafana dashboard, but can
+still reveal project details; approve the exact field allowlist before enabling
+their publisher. No transcript/evidence excerpt export is included. Existing
+client sync is a separate policy to inspect.
 
 ### Operational telemetry
 
@@ -423,7 +465,8 @@ as actual monetary spend.
 | T2. Native collector | Lifecycle, filtering, durable queue, controlled endpoint | Restart/wake/offline/privacy tests pass; no cloud dependency for buffering |
 | T3. Azure telemetry pilot | Approved resources, auth, ingestion, portal dashboard | Costs approved; delivery, renewal, queries, accounting, and rollback verified |
 
-The reflection phases are sequential. The telemetry track may proceed independently
+Synthetic assessment evaluation may precede the local batch foundation to test
+usefulness before investing in infrastructure. The telemetry track may proceed independently
 after phase 0 and its own approvals; T2 depends on T1, and T3 on T2. Lack of telemetry
 must not delay an otherwise working local daily report.
 
@@ -494,12 +537,24 @@ Selected during planning, not authorization to run capture or inference:
 - Daily analysis of explicitly completed/archived sessions only; no idle heuristic.
 - Keep inference blocked until synthetic local-versus-Azure evaluation.
 - Retain owned content for 30 days and assessments/reports for 90 days.
+- One authenticated Grafana dashboard is the target for both derived assessments
+  and OTel. Analysis is daily; reading is on demand. No prompts/chats, code, tool
+  payloads, or evidence excerpts are published to the dashboard's data stores.
 
 The user has requested feasibility spikes before implementation. Their bounded
 experiments, dependencies, and go/no-go criteria are in [SPIKES.md](SPIKES.md).
 Start with S1/S2; no result is assumed and downstream work stops if those fail.
 No Azure provisioning or telemetry re-enablement is needed for that source proof.
-Real-content inference and production implementation remain unapproved.
+Real-content inference and deployment remain unapproved. Bounded development and
+synthetic evaluation may begin on a feature branch.
+
+During S1/S2 the user approved synthetic fixture creation/UI actions and confirmed
+that marking sessions Done/archive fits their workflow. Local capture and
+archive/resume were demonstrated. Subsequent workflow review accepted this as
+technically feasible for the tested scope; restart and active-run/publication
+checks move to implementation acceptance tests. Synthetic S4 evaluation is next.
+The user requested that owned raw spike evidence be removed after preserving
+sanitized findings; native client history is not automatically deleted.
 
 Decisions gated until evidence is available:
 

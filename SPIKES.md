@@ -1,6 +1,8 @@
 # Feasibility spikes
 
-**Status: defined, not executed. No feasibility gate has passed yet.**
+**Status: S1/S2 investigated on 2026-11-23; core capture/archive feasible for the
+tested scope.** Restart/concurrency remain implementation acceptance tests.
+See [session capture findings](docs/spikes/session-capture-findings.md).
 
 Validate the assumptions in [PLAN.md](PLAN.md) before committing to implementation.
 The first decision is whether passive, finished-session reflection works for the
@@ -10,10 +12,10 @@ primary client, VS Code. A working CLI example is not a substitute.
 
 | Spike | Question | Time box | Prerequisite | Initial state |
 | --- | --- | --- | --- | --- |
-| S1 | Can we capture useful VS Code history passively and locally? | 2 hours | None | Ready |
-| S2 | Can we identify explicitly finished revisions without guessing? | 2 hours | S1 passes | Waiting |
+| S1 | Can we capture useful VS Code history passively and locally? | 2 hours | None | Go for tested local default-chat scope |
+| S2 | Can we identify explicitly finished revisions without guessing? | 2 hours | S1 passes | Go for archive-based feasibility; reliability tests deferred |
 | S3 | Can the desktop app use the same approach without duplicate sessions? | 90 minutes | S2 passes | Waiting |
-| S4 | Can a bounded model assessment produce trustworthy, useful findings? | 3 hours | S2 passes; inference access/cost approved | Waiting |
+| S4 | Can a bounded model assessment produce trustworthy, useful findings? | 3 hours | S2 feasible; execution requires inference access/cost approval | Next: fixtures/rubric |
 | S5 | Can a small native daily worker recover and manage data safely? | 2 hours plus one overnight/wake observation | S4 passes | Waiting |
 | T1 | Can metadata-only telemetry be attributed without dashboard joins? | 2 hours | Separate controlled telemetry approval | Deferred; independent |
 
@@ -285,8 +287,8 @@ not be replaced by expectations from documentation.
 
 | Spike | Result | Evidence | Decision |
 | --- | --- | --- | --- |
-| S1 | Not run | None | No capture feasibility claim yet |
-| S2 | Not run | None | No finished-session feasibility claim yet |
+| S1 | Go, scoped | [Findings](docs/spikes/session-capture-findings.md) | Native capture demonstrated for tested version/default chats; wider coverage unproven |
+| S2 | Go, scoped | [Findings](docs/spikes/session-capture-findings.md) | Archive/resume demonstrated and workflow accepted; restart/concurrency retained as acceptance tests |
 | S3 | Not run | None | App coverage unproven |
 | S4 | Not run | None | Inference remains blocked for real content |
 | S5 | Not run | None | Scheduling/recovery unproven |
@@ -300,9 +302,11 @@ passing. Conditional results require a reviewed scope/policy change.
 
 ### Overall decision
 
-- **Current:** plausible from documented capabilities, but not yet demonstrated.
-- **Next:** execute S1, then S2 only if S1 passes.
+- **Current:** primary local capture and explicit archive demonstrated on synthetic
+  VS Code fixtures; accepted as technically feasible for that scope.
+- **Next:** S4 synthetic fixtures/rubric, then approved provider evaluation.
 - **After S1/S2:** approve further spikes only if passive VS Code capture and strict
   eligibility are supported under an acceptable maintenance/workflow tradeoff.
-- **Before implementation:** require useful assessment evidence from S4 and reliable
-  local operation from S5. App and telemetry support remain separate scope decisions.
+- **Before production rollout:** require useful assessment evidence from S4 and
+  reliable local operation from S5, including restart/concurrency acceptance tests.
+  App and telemetry support remain separate scope decisions.
