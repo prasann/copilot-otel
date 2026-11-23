@@ -122,27 +122,71 @@ provider configuration in the run log; do not equate estimated cost with invoice
 The scorecard is a manual review aid, not a validated result-import or publishing
 format. No automatic aggregate decision is implemented.
 
-Provider access, downloads/provisioning, spend cap, longer-input resource testing,
-and real-content permission are still outstanding. No provider has been evaluated.
+The user subsequently chose a basic working pilot before full evaluation. One
+synthetic Azure model smoke succeeded; that is not a pass of the scoring procedure
+above. The full comparison, longer-input testing, and real-content permission remain
+outstanding. See the [current checklist](tasks.md).
 
-## Azure configuration placeholder
+## Azure synthetic runner configuration
 
 The user selected an existing Azure deployment for the first candidate; its
-endpoint, deployment name, and model/version will be supplied later. Authentication
+endpoint, deployment name, and model/version are configured locally. Authentication
 uses the signed-in Azure CLI identity (`az login`), not an API key.
 Copy [the environment template](../../.env.example) to a local `.env` and fill it
 when ready. `.env` is ignored by Git; do not paste credentials into chat.
 
-The current offline tools do not load `.env` or make model calls. The template is
-for the next runner, not an already implemented integration. Leave inference
-disabled until endpoint/API compatibility, auth, and synthetic-only scope are
-verified. The future runner must explicitly use Azure CLI credentials, verify
-the target resource's token audience and data-plane permissions, and surface
-expired-login/access failures without falling back to another identity. Do not
-save access tokens in `.env`, logs, or generated request files.
+The offline tools do not load `.env` or make model calls.
+`python -m tools.azure_pilot assess --execute` is the separate explicit live
+synthetic runner. It requires the synthetic opt-in flag and uses Azure CLI
+credentials via `az rest`, with an explicit `https://ai.azure.com` audience and
+no identity fallback. Endpoint/auth compatibility succeeded on the selected
+GPT-5 mini deployment. Do not save tokens in `.env`, logs, or request files.
 
-The proposed first run is 16 requests (eight evaluation cases twice), with no
-automatic retries and a per-request output-token ceiling. These bounds are not
-a monetary cap. The user intends to configure deployment-side limits; verify
+The original 16-request evaluation (eight cases twice) is deferred. The working
+pilot starts with one synthetic request, no automatic retries, a 2,000-token
+output ceiling, and a persistent checkout-local maximum of 16 attempts including
+failures. These bounds are not a monetary cap.
+The user intends to configure deployment-side limits; verify
 their actual semantics rather than assuming rate/token limits cap total spend.
 One Azure candidate does not complete the originally proposed local/Azure comparison.
+
+## Local unified synthetic demo
+
+For Azure prerequisites and the intended `azd` deployment workflow, see the
+[Azure pilot setup checklist](../../docs/azure-setup.md). The deployment template
+now provisions the Entra-authenticated monitoring baseline and repo-backed portal
+Grafana panels, not a dedicated Managed Grafana instance. Cloud deployment and
+definition read-back succeeded; browser rendering remains unverified.
+
+From the repository root:
+
+```bash
+.venv/bin/python -m tools.local_demo
+.venv/bin/python -m unittest discover -s tests
+```
+
+The demo prints one combined JSON preview with an authored assessment and synthetic
+usage grouped under the same project IDs. No services are started, model calls
+made, native history read, or Azure resources accessed. This is a local data-flow
+demonstration, not a running Grafana dashboard or real OTel receiver.
+
+Folder attribution uses `<projects-root>/<personal|msft>/<project>/...`.
+`project.name` is the project folder; `project.id` includes category to distinguish
+duplicate names. Nested folders inherit the top-level project. Paths are resolved
+locally (including symlinks) and not included in the output. Unsupported/outside
+paths remain explicitly unattributed; relative paths are rejected.
+
+The default root is the current user's home directory plus `projects`; override
+with `--projects-root /absolute/path` for another machine. The synthetic examples
+are constructed in memory, not discovered on disk. A pure folder mapper cannot
+prove that a telemetry record actually originated in that workspace.
+
+Expected totals: four received usage records including one replay, three unique
+records, 325 input tokens and 55 output tokens. Of these, 25 input and 5 output
+tokens are unattributed. The two projects both named `sample` stay separate.
+Conflicting replays fail instead of silently choosing a value.
+
+The assessment is deliberately hand-authored and structurally validated, not
+model-assessed. Raw fixture prompts/tool output are not included in the preview.
+Evidence IDs are local references only. Real-client attribution, native worktree
+mapping, multi-root policy, provider evaluation, and Azure/Grafana remain unproven.

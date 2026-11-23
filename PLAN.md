@@ -6,7 +6,14 @@ Real-content inference and deployment remain separately approval-gated.**
 This plan supersedes the telemetry-first proposal. The main goal is a passive,
 daily reflection on coding-agent work, starting with new sessions on this Mac.
 Telemetry is a separate supporting pipeline, not a proxy for productivity.
-Existing runtime configuration and infrastructure remain unchanged.
+Native client runtime configuration remains unchanged. The repo's `azd` template
+has deployed the Entra-authenticated monitoring baseline and initial portal
+Grafana panels, without dedicated Managed Grafana. One synthetic Azure model
+smoke request succeeded; the publisher is synthetic-only. Browser rendering,
+native collection, scheduling, and real-content approval remain pending.
+See the [pilot checklist](specs/session-reflection/tasks.md) and
+[Azure setup checklist](docs/azure-setup.md). The working-pilot rollout uses basic
+connection checks first; the larger model comparison is deferred, not passed.
 
 Feasibility work is defined in [SPIKES.md](SPIKES.md). S1/S2 have scoped
 [synthetic VS Code findings](docs/spikes/session-capture-findings.md): local

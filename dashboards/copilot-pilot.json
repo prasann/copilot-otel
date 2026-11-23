@@ -1,0 +1,97 @@
+{
+  "uid": "copilot-reflection-pilot",
+  "title": "Copilot reflection and telemetry - pilot",
+  "description": "Derived assessments and collection status. Synthetic smoke rows are labelled; real client collection and token accounting are not enabled yet.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": {"from": "now-7d", "to": "now"},
+  "refresh": "5m",
+  "tags": ["copilot", "pilot"],
+  "templating": {
+    "list": [
+      {
+        "name": "am_ds",
+        "label": "Azure Monitor",
+        "type": "datasource",
+        "query": "grafana-azure-monitor-datasource",
+        "refresh": 1,
+        "options": []
+      },
+      {
+        "name": "project",
+        "label": "Project ID (* = all)",
+        "type": "textbox",
+        "query": "*",
+        "current": {"text": "*", "value": "*"},
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pilot status and boundaries",
+      "type": "text",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 4},
+      "options": {
+        "mode": "markdown",
+        "content": "### Synthetic smoke pilot\nAssessment rows labelled `synthetic_azure_model_smoke` are test fixtures, not real project work. Model inference is connected; native client collection and daily scheduling are **not installed**. Only reviewed derived summaries are published. Project IDs will use `personal/project` or `msft/project`; `synthetic/demo` is reserved for this smoke test. The time picker filters **assessment creation time**, not source-session time."
+      }
+    },
+    {
+      "id": 2,
+      "title": "Assessment summaries",
+      "type": "table",
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 9},
+      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "options": {"showHeader": true, "cellHeight": "md"},
+      "fieldConfig": {"defaults": {"custom": {"cellOptions": {"type": "auto"}, "wrapText": true}}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Assessment freshness by project",
+      "type": "table",
+      "gridPos": {"x": 0, "y": 13, "w": 12, "h": 7},
+      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastAssessment=max(TimeGenerated), EligibleRowsVisible=count() by ProjectId, Origin\n| extend MinutesSinceAssessment=datetime_diff('minute', now(), LastAssessment)\n| order by LastAssessment desc"
+          }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Usage and reliability - not collecting yet",
+      "type": "text",
+      "gridPos": {"x": 12, "y": 13, "w": 12, "h": 7},
+      "options": {
+        "mode": "markdown",
+        "content": "Native OTel collector: **not installed**.\n\nProject-level tokens, latency, errors, and delivery health are **unavailable**, not zero. They will be wired after one controlled client sample proves workspace identity and the correct accounting layer.\n\nThe Azure model smoke test's inference usage is local evaluation usage, not coding-session telemetry, and is intentionally excluded. An assessment timestamp does not prove the collector is healthy. This status panel is static until installation."
+      }
+    }
+  ]
+}

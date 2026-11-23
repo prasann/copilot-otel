@@ -1,184 +1,160 @@
 ---
-title: GitHub Copilot OTEL Dashboard
-description: Provision Azure Monitor + Managed Grafana with azd, run a local OTEL collector, and view Copilot telemetry in dashboard 25053.
-ms.date: 2026-07-09
+title: Copilot reflection and observability
+description: An azd-managed Azure Monitor baseline for metadata-only telemetry and derived session assessments.
 ms.topic: how-to
-keywords:
-  - github-copilot
-  - opentelemetry
-  - azure-monitor
-  - application-insights
-  - grafana
-  - observability
-estimated_reading_time: 10
 ---
 
-> **Modernization plan pending approval:** Start with [PLAN.md](PLAN.md) and its
-> [editable architecture](docs/architecture.excalidraw). The primary goal is now
-> daily, evidence-backed reflection on finished VS Code/Copilot app sessions,
-> using protected local history. Metadata-only telemetry is a separate supporting
-> pipeline. Model selection and real-content inference remain blocked pending
-> evaluation and approval. Nothing in that plan is implemented yet.
-> Validate feasibility using the bounded experiments in [SPIKES.md](SPIKES.md),
-> starting with passive VS Code capture and explicit completion detection.
-> The instructions below describe the legacy deployment; running `azd up`
-> still provisions dedicated Managed Grafana Standard and does not implement
-> the proposed architecture.
+# Copilot reflection and observability
 
-## Overview
+One authenticated Azure Monitor dashboard with Grafana is the target reading
+experience for session assessments and metadata-only usage/reliability telemetry.
+Prompts, replies, code, tool payloads, and evidence excerpts stay out of dashboard
+storage. Real-history model inference requires separate approval.
 
-This project provisions the Azure side of the Copilot observability stack and configures a local OpenTelemetry collector that forwards VS Code and Copilot CLI telemetry to Application Insights. It uses `azd` for infrastructure and Docker for the collector.
+## Status
 
-Provisioned resources:
+- Offline synthetic assessment preparation/validation and a combined local demo work.
+- The monitoring baseline and initial dashboard definition have been deployed
+  in South India using `azd`.
+- One synthetic GPT-5 mini assessment succeeded using Azure CLI authentication.
+  One reviewed summary was ingested and queried back with stored fields verified.
+- Dashboard definition read-back and both panel queries/project-time filtering
+  have been checked through Azure CLI. Visual rendering remains a user check.
+- Native capture/export, daily scheduling, real-history inference, and reliable
+  telemetry delivery are not enabled. Usage panels clearly mark that missing source.
 
-* Log Analytics workspace (30-day retention)
-* Workspace-based Application Insights
-* Azure Managed Grafana (Standard, system-assigned identity)
-* Role assignments: `Monitoring Reader` for the Grafana MSI on the resource group, `Grafana Admin` for the deploying user
+See [PLAN.md](PLAN.md) for the architecture,
+[SPIKES.md](SPIKES.md) for feasibility evidence, and
+[the first-slice spec](specs/session-reflection/spec.md) for evaluation details.
 
-## Session-to-story attribution
+## Azure setup
 
-Beyond raw telemetry, this project supports attributing each Copilot session, and the tokens it consumes, to the work item (git branch) it was spent on. This answers questions like "how many tokens did branch `feature/login` cost?" across VS Code Copilot Chat and the Copilot CLI, even with several projects open at once.
+Follow [the Azure pilot setup checklist](docs/azure-setup.md) for authentication,
+subscription/region selection, least-privilege roles, existing model configuration,
+deployment review, and remaining acceptance checks.
 
-Rather than tagging telemetry globally at the collector (which cannot represent two concurrent sessions), the design keeps two concerns separate: a system-wide Copilot hook emits a lightweight `session -> story` mapping event at each session boundary, and the dashboard joins that mapping to the Copilot telemetry at query time in KQL. The two sides never call each other directly; they meet only at a versioned contract, the shape of the OTLP mapping event. The producer side lives in a separate hooks repo; see [emit-mapping.sh](https://github.com/prasann/agent-box/blob/main/vscode-prompts/.github/hooks/scripts/emit-mapping.sh) for the emitter and [docs/session-story-attribution-plan.md](docs/session-story-attribution-plan.md) for the full design, KQL join, and opt-out controls.
+The existing [azure.yaml](azure.yaml) uses [Bicep](infra/main.bicep) to create:
 
-```mermaid
-flowchart LR
-  subgraph HR["Hooks repo (~/.copilot/hooks)"]
-    H[sessionStart / sessionEnd<br/>VS Code + CLI] --> S[emit-mapping.sh]
-  end
-  subgraph CR["copilot-otel repo"]
-    C[collector :4318] --> AI[(App Insights)]
-    AI --> G[Grafana: tokens per branch / repo]
-  end
-  Cop[Copilot telemetry] --> C
-  S -->|OTLP log event = the contract| C
-```
+| Resource | Purpose |
+| --- | --- |
+| Log Analytics workspace | Shared query destination; 30-day default retention |
+| Workspace-based Application Insights | Future metadata-only OTel destination; Entra-only ingestion |
+| Assessment table and direct data collection rule | Typed derived-summary ingestion; 90-day table retention |
+| Azure Monitor Grafana dashboard and definition | Derived-summary/freshness panels and explicit telemetry status, without a dedicated Grafana instance |
+| Scoped role assignments | Pilot user can read data/dashboard and publish to the assessment rule |
 
-## Prerequisites
+No Azure OpenAI/model deployment, API keys, app registrations, Docker hosts, or
+dedicated Managed Grafana Standard instance are created. The existing model is
+configured separately and is never managed or deleted by this template.
 
-* [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) 1.25+
-* Azure CLI, logged in (`az login`)
-* Docker Desktop
-* VS Code with GitHub Copilot; optionally the Copilot CLI
-
-## 1. Provision Azure resources
+After signing into Azure CLI and `azd`, run from the repository root, replacing
+placeholders:
 
 ```bash
-git clone https://github.com/YOUR-ORG/copilot-otel.git
-cd copilot-otel
-azd auth login            # if not already
-azd env new copilot-otel  # environment name is used to derive rg-<name>
-azd up                    # prompts for subscription + region on first run
-```
-
-`azd up` provisions the resource group and everything in [infra/main.bicep](infra/main.bicep). Outputs are written to `.azure/<env>/.env`.
-
-## 2. Export the Application Insights connection string
-
-```bash
-export APPLICATIONINSIGHTS_CONNECTION_STRING="$(azd env get-value APPLICATIONINSIGHTS_CONNECTION_STRING)"
-export DEPLOYMENT_ENV=dev
-```
-
-> [!IMPORTANT]
-> Treat the connection string as a secret. Do not commit it.
-
-## 3. Start the local OTEL collector
-
-The collector reads the connection string from the environment, so nothing sensitive lives in [otel-collector-config.yaml](otel-collector-config.yaml).
-
-```bash
-docker run -d \
-  --name otel-collector \
-  --restart unless-stopped \
-  -p 4317:4317 -p 4318:4318 \
-  -e APPLICATIONINSIGHTS_CONNECTION_STRING \
-  -e DEPLOYMENT_ENV \
-  -v "$PWD/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml" \
-  otel/opentelemetry-collector-contrib:latest
-```
-
-Verify:
-
-```bash
-docker logs otel-collector | tail -20
-curl -i http://localhost:4318/v1/traces   # 405 Method Not Allowed is expected
-```
-
-## 4. Configure VS Code Copilot
-
-Add to your user `settings.json` (Command Palette → `Preferences: Open User Settings (JSON)`):
-
-```json
-{
-  "github.copilot.chat.otel.enabled": true,
-  "github.copilot.chat.otel.exporterType": "otlp-http",
-  "github.copilot.chat.otel.otlpEndpoint": "http://localhost:4318",
-  "github.copilot.chat.otel.captureContent": true
-}
-```
-
-Reload the window.
-
-## 5. Configure the Copilot CLI (optional)
-
-Append to `~/.zshrc` (or `~/.bashrc`):
-
-```bash
-export COPILOT_OTEL_ENABLED=true
-export COPILOT_OTEL_EXPORTER=otlp-http
-export COPILOT_OTEL_ENDPOINT=http://localhost:4318
-export COPILOT_OTEL_CAPTURE_CONTENT=true
-```
-
-Then `source ~/.zshrc`.
-
-## 6. Verify telemetry lands in Application Insights
-
-Trigger a Copilot chat in VS Code, wait 2-5 minutes, then in the Azure portal open the App Insights resource → **Logs**:
-
-```kusto
-dependencies
-| where cloud_RoleName == "copilot-chat"
-| take 10
-```
-
-## 7. Import the Grafana dashboard
-
-```bash
-azd env get-value GRAFANA_ENDPOINT
-```
-
-Open the URL, sign in with the same Azure account, then:
-
-1. **Connections → Data sources → Add data source → Azure Monitor**. Authentication is **Managed Identity**. Save & Test.
-2. **Dashboards → New → Import → 25053 → Load**. Select the Azure Monitor data source and the App Insights resource, then Import.
-
-## Common operations
-
-```bash
-# Update infra
+azd env new copilot-pilot
+azd env set AZURE_SUBSCRIPTION_ID <subscription-id>
+azd env set AZURE_LOCATION <monitoring-region>
+azd provision --preview
+# Review resource, role, region, and cost changes before applying:
 azd provision
-
-# Stream collector logs
-docker logs -f otel-collector
-
-# Recreate collector after config change
-docker rm -f otel-collector   # then re-run the docker run command
-
-# Tear everything down (deletes the resource group)
-azd down --purge
 ```
 
-## Cost note
+Use a fresh environment/resource group for this pilot. Existing inherited
+permissions still apply. The baseline uses public TLS endpoints restricted by
+Entra/RBAC, not private networking.
 
-Application Insights ingestion is billed per GB (~USD 2.30/GB after the 5 GB monthly free tier). Managed Grafana Standard is billed per active user hour. Run `azd down` when you are done experimenting.
+The portal dashboard uses your signed-in user's data permissions, not a Grafana
+managed identity. Provisioning installs the repo-backed
+[dashboard definition](dashboards/copilot-pilot.json) through the documented
+`dashboardDefinitions` child resource API. Browser rendering and datasource
+selection still need a signed-in portal check. Usage is explicitly unavailable
+until native telemetry is connected.
 
-## Contributing
+Local `.env` and `.azure/` configuration stay ignored. Commit templates and
+non-secret examples, not environment outputs, credentials, or raw histories.
+Ingestion/storage/query costs still apply even though the portal Grafana
+experience has no separate dashboard hosting charge.
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## Local synthetic demo
 
-## License
+Requires Python 3.11+ and the dependencies in [requirements.txt](requirements.txt).
+With a configured local virtual environment:
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+```bash
+.venv/bin/python -m tools.local_demo
+.venv/bin/python -m unittest discover -s tests
+```
+
+The demo prints a combined JSON preview with an explicitly authored assessment,
+synthetic token usage, category-aware folder attribution, unattributed usage, and
+replay deduplication. No history is read, services started, model called, or data
+uploaded. It is not a running dashboard or a real OTel receiver.
+Infrastructure tests also compile Bicep when Azure CLI is installed; install its
+Bicep compiler first. They are explicitly skipped when Azure CLI is absent.
+
+## Azure synthetic smoke
+
+Follow [the setup checklist](docs/azure-setup.md), populate local `.env`, then
+explicitly enable `ASSESSMENT_ALLOW_SYNTHETIC_INFERENCE=true` for synthetic calls:
+
+```bash
+.venv/bin/python -m tools.azure_pilot assess --execute
+# Inspect the returned assessment file and write a short derived summary yourself:
+.venv/bin/python -m tools.azure_pilot publish <assessment-file> \
+  --summary "<reviewed synthetic summary, not a quotation>" --execute
+.venv/bin/python -m tools.azure_pilot query <receipt-file>
+```
+
+The runner only loads development fixtures, not arbitrary history files. Calls
+use `az rest` with explicit token audiences and the Azure CLI identity, with no
+API keys or saved tokens. One command sends one model request, no tools, no
+automatic retries, `store=false`, low reasoning effort, and at most 2,000 output
+tokens. Failed attempts count against the checkout-local 16-attempt maximum.
+This is not a monetary cap or a full quality evaluation.
+
+Responses and receipts live under ignored `.pilot/`. Do not delete the attempt
+ledger to bypass the budget or commit the generated model responses. The configured
+model version is a configuration label; the returned model ID is recorded separately,
+and does not prove a specific serving version.
+
+The synthetic publisher uses only typed allowlisted columns and a manually
+reviewed summary, not raw model prose. It rejects complete fixture-event quotations;
+this is not a general semantic redactor and must not be used for real histories.
+Source timestamps are synthetic and labelled as such. A successful upload means
+accepted, not query-verified: if query-back reports propagation pending, retry
+only the read command later, not the upload.
+
+## Deployment validation
+
+Install Azure CLI, Azure Developer CLI, and Bicep. Local compilation does not need
+a cloud deployment:
+
+```bash
+az bicep install  # only if the compiler is missing
+az bicep lint --file infra/main.bicep
+az bicep build --file infra/main.bicep --stdout > /dev/null
+```
+
+Then use `azd provision --preview` with your selected environment to check actual
+Azure changes. Preview and deployment require appropriate Azure permissions and
+supported regions. The pilot has been deployed; subsequent runs update that
+environment and must still be reviewed.
+
+## Legacy assets
+
+[otel-collector-config.yaml](otel-collector-config.yaml), the branch-spend
+[dashboards](dashboards/), and
+[session-story attribution design](docs/session-story-attribution-plan.md) are
+legacy experiments, not the new production pipeline. **Do not enable the old
+collector/settings or upload raw content.** The old collector lacks the required
+allowlist, durable delivery, and Entra exporter authentication for this baseline.
+Do not use the old session-to-story joins as verified project attribution.
+
+If upgrading an older environment, incremental provisioning does not delete its
+previous Managed Grafana instance. Review those resources separately. Only use
+`azd down` when the selected environment contains exclusively disposable
+pilot-owned resources, never a shared model or other shared infrastructure.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).
