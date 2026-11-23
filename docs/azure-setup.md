@@ -2,15 +2,20 @@
 
 ## What you can do now
 
-Azure deployment, including the latest dashboard refresh, was confirmed complete
+Azure deployment, including the earlier dashboard refresh, was confirmed complete
 by the user on **23 November 2026**. For a new environment or an update, prepare
 Azure access and the existing model deployment, then preview and provision the
 monitoring baseline using section 5. Offline tests do not connect
 to Azure. A separate explicit synthetic runner/publisher
 connects to Azure. A native macOS collector supports metadata-only traces.
-The [opt-in attribution gateway](../README.md#opt-in-project-attribution) and its
-new dashboard diagnostic columns are now implemented and tested offline; they
-have not been enabled/deployed or accepted against live two-project telemetry.
+The [opt-in attribution gateway](../README.md#opt-in-project-attribution) is
+running in the background for `personal/copilot-otel` only; the Insiders endpoint
+is saved, with editor reload and real attributed query-back still pending.
+The gateway does not restart automatically after logout/reboot. Its dashboard
+diagnostic columns were deployed separately, preserving portal identity/title,
+and definition read-back plus the updated Azure query passed. The full
+`azd provision --preview` also proposed Application Insights property changes,
+so that full plan was not applied. Two-project live acceptance remains pending.
 VS Code Insiders settings were configured globally; reload and real-client
 verification remain pending. The [real-session worker](session-reflection.md) is
 implemented and explicitly enabled for the pilot's approved projects root. Its

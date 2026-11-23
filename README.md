@@ -14,8 +14,8 @@ current service health.
 | Area | Implemented / recorded evidence | Still pending |
 | --- | --- | --- |
 | Session reflection | Read-only native capture, bounded worker, retention, daily scheduling, reviewed-summary publisher | First eligible real capture, assessment, and published-summary query-back |
-| Metadata telemetry | Native macOS collector, filtering before disk queue, synthetic privacy/query-back checks; opt-in project attribution tested offline | Controlled live attribution/query-back; usage accounting |
-| Azure dashboard | Monitoring baseline and previous dashboard deployed (user-confirmed); attribution diagnostic columns added locally | Deploy attribution diagnostics; verify rendering and portal controls |
+| Metadata telemetry | Native collector and opt-in gateway started in recorded setup; metadata attribution approved for `personal/copilot-otel`; offline binary tests pass | Editor reload and controlled live two-project attribution/query-back; usage accounting |
+| Azure dashboard | Attribution diagnostics deployed, definition read back, and updated query executed successfully | Verify latest rendering and portal controls |
 | Assessment quality | Rubric, schemas, separate evaluation fixtures, one bounded Azure synthetic model call | Repeated scored evaluation, longer inputs, local/Azure comparison |
 
 The last recorded pilot setup on **23 November 2026** enabled reflection for new
@@ -29,6 +29,32 @@ New installations keep inference and scheduling disabled until explicitly enable
 Azure deployment, including the last recorded dashboard refresh, was confirmed complete
 on **23 November 2026**. Live acceptance checks below remain separate.
 
+Later on **23 November**, the attribution gateway was started in the background
+for `personal/copilot-otel` only, and the Insiders endpoint was saved as
+`http://127.0.0.1:4319`. Content and identity capture remain off. Reload the editor
+and use a controlled new session before claiming live attributed delivery.
+The gateway does not restart automatically after logout/reboot.
+
+The dashboard attribution diagnostics were updated separately and read-back/query
+verified. The full `azd provision --preview` also proposed Application Insights
+property changes, so that full plan was **not applied**. Only the dashboard
+definition changed, preserving its portal identity and title.
+
+### Completed implementation and recorded setup
+
+- [x] Implement native capture, bounded reflection, retention, and reviewed-summary
+  publishing; enable the pilot policy and install the daily job.
+- [x] Implement native metadata filtering and disk queueing; verify synthetic
+  privacy filtering and Azure query-back.
+- [x] Implement opt-in exact host/SDK session attribution and bounded OTLP gateway;
+  cover resolution, failure handling, and privacy with offline tests.
+- [x] Start the pilot gateway for `personal/copilot-otel` and save the Insiders
+  endpoint, without enabling content or identity capture.
+- [x] Deploy dashboard attribution diagnostics and verify definition read-back
+  and query execution.
+
+These are implementation and recorded setup milestones, not live acceptance.
+
 ### Pending acceptance
 
 - [ ] Inspect a new archived session's metadata-only preview, review its first
@@ -36,7 +62,9 @@ on **23 November 2026**. Live acceptance checks below remain separate.
 - [ ] Verify capture identity and eligibility after a full editor/host restart,
   including cancellation, resume, and publication timing.
 - [ ] Observe a real 09:00 run, sleep/wake or login catch-up, and worker recovery.
-- [ ] Reload Insiders and verify native spans in Azure.
+- [ ] Reload Insiders and query back real spans with exact session identities,
+  approved project aliases, and no workspace paths; repeat with a second
+  explicitly approved project.
 - [ ] Check the deployed dashboard's rendering and project/time filters.
 - [ ] Prove project identity and reconcile concurrent projects, subagent overlap,
   and replay against known totals before adding usage or delivery/error panels.
@@ -59,13 +87,17 @@ contract. Usage totals and broader rollout remain deferred, not completed.
 flowchart LR
   subgraph Mac["Mac"]
     Client["VS Code Insiders<br/>content + identity capture OFF"]
-    Filter["Native OTel Collector<br/>loopback :4318<br/>metadata allowlist"]
+    Filter["Native OTel Collector<br/>direct :4318 / attributed :4320<br/>metadata allowlist"]
+    Gateway["Opt-in attribution gateway<br/>loopback :4319<br/>exact approved session identities"]
+    Catalog["Read-only native catalog<br/>host / SDK ID mapping"]
     Queue[("Disk queue<br/>128 requests / 64 MiB")]
     History["New archived sessions<br/>explicit project allowlist"]
     Capture["Read-only capture<br/>version + activity checks"]
     Assess["Daily assessment worker<br/>explicit activation"]
     Review["Local validation<br/>human-reviewed summary"]
-    Client -->|OTLP HTTP| Filter --> Queue
+    Client -->|Direct OTLP HTTP| Filter --> Queue
+    Client -->|Opt-in OTLP HTTP/JSON| Gateway --> Filter
+    Catalog -.->|Metadata lookup only| Gateway
     History --> Capture --> Assess --> Review
   end
   subgraph Azure["Azure Monitor - Entra / RBAC"]
@@ -82,7 +114,10 @@ flowchart LR
 
 These are **independent paths**: telemetry does not trigger assessment. The
 collector discards client logs and aggregate metrics, and strips content before
-queueing traces. The real-session worker reads only new, allowlisted archived sessions; inference
+queueing traces. The optional gateway adds only approved project aliases and
+fixed attribution diagnostics; direct or unresolved spans remain `unattributed`.
+Its metadata policy is separate from reflection approval and triggers no inference.
+The real-session worker reads only new, allowlisted archived sessions; inference
 and scheduling require explicit activation. Model inference uses a separately configured existing Azure
 deployment; Bicep does not create or manage it.
 
@@ -100,7 +135,7 @@ Tests use authored fixtures and isolated native stores. They do not read real
 history, call models, upload data, or install services.
 
 Infrastructure tests compile Bicep if Azure CLI is present; its Bicep compiler
-must also be installed. The native-binary privacy test runs only if the pinned
+must also be installed. Native-binary privacy and attribution tests run only if the pinned
 collector is already installed. Neither test installs these tools for you.
 
 ## Deploy Azure
@@ -172,6 +207,12 @@ clients need separate configuration and verification.
 .venv/bin/python -m tools.native_collector uninstall
 ```
 
+If query-back is pending, retry the read, not `smoke`. Local health is not proof
+of Azure delivery. State, queue, and warn/error logs are retained under
+`~/Library/Application Support/copilot-otel`; inspect `logs/collector.stderr.log`
+for failures. Logs are not yet rotated. Expired authentication requires `az login`.
+Uninstall removes the recognized LaunchAgent, not its retained data.
+
 ### Opt-in project attribution
 
 The default receiver on `127.0.0.1:4318` still marks spans `unattributed`.
@@ -240,19 +281,14 @@ not payloads or workspace paths. Existing collector logs are not rotated.
 Before claiming live support, send controlled sessions from two approved
 projects, query back their exact identities/aliases and absence of paths, then
 verify project filters in the deployed dashboard. Offline binary tests do not
-establish real-client/Azure acceptance. The new dashboard attribution status/reason
-columns also require a separate reviewed infrastructure deployment; installing
-the gateway does not deploy them.
+establish real-client/Azure acceptance. The pilot's dashboard attribution
+status/reason columns are already deployed and read-back/query verified; rendering
+remains pending. New environments still require a separately reviewed
+infrastructure deployment; installing the gateway does not deploy dashboard changes.
 
 To disable: restore the client endpoint to `http://127.0.0.1:4318`, reload, stop
 the gateway with Ctrl-C, then stop/reinstall the collector without
 `--attribution-policy`. Historical Azure records are unchanged.
-
-If query-back is pending, retry the read, not `smoke`. Local health is not proof
-of Azure delivery. State, queue, and warn/error logs are retained under
-`~/Library/Application Support/copilot-otel`; inspect `logs/collector.stderr.log`
-for failures. Logs are not yet rotated. Expired authentication requires `az login`.
-Uninstall removes the recognized LaunchAgent, not its retained data.
 
 ## Azure synthetic smoke
 
@@ -288,6 +324,7 @@ Activity over time                 | Observed operations
 ----------------------------------------------------------------------
 Assessment summaries
   > Inspect data: freshness and individual spans
+      ProjectId | Attribution | AttributionReason | span metadata
   > Pilot notes: privacy, accounting, and analysis scope
 ```
 
@@ -301,6 +338,9 @@ or an exact project ID; refresh is five minutes.
 - Direct native spans remain `unattributed`; the opt-in gateway can label exact,
   approved session identities. Accounting remains unverified. Project filters
   cannot reconstruct missing identity or relabel historical rows.
+- Expand **Inspect data** to see `Attribution` and `AttributionReason` on individual
+  spans. Gateway-resolved spans use `attributed` / `resolved`; unresolved gateway
+  spans report a fixed reason. Direct spans do not have gateway reason diagnostics.
 - Queries deduplicate replayed spans and assessment revisions before time filtering.
   Lookbacks are capped at 30 days for spans and 90 days for assessments.
 - Synthetic smoke records are excluded. Real assessments appear only after
