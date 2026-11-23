@@ -10,6 +10,79 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class DashboardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.dashboard = json.loads((ROOT / "dashboards/copilot-pilot.json").read_text())
+        cls.panels = [
+            child
+            for panel in cls.dashboard["panels"]
+            for child in ([panel] + panel.get("panels", []))
+        ]
+
+    def test_overview_keeps_details_collapsed_and_layout_non_overlapping(self) -> None:
+        overview = self.dashboard["panels"]
+        self.assertEqual(sum(panel["type"] == "stat" for panel in overview), 4)
+        self.assertTrue({"timeseries", "bargauge", "table"} <= {
+            panel["type"] for panel in overview
+        })
+        self.assertEqual(len({panel["id"] for panel in self.panels}), len(self.panels))
+        for panel in self.panels:
+            if panel["type"] == "row":
+                self.assertTrue(panel["collapsed"])
+        for group in [overview] + [
+            panel["panels"] for panel in overview if panel["type"] == "row"
+        ]:
+            for index, panel in enumerate(group):
+                position = panel["gridPos"]
+                self.assertGreater(position["w"], 0)
+                self.assertGreater(position["h"], 0)
+                self.assertGreaterEqual(position["x"], 0)
+                self.assertLessEqual(position["x"] + position["w"], 24)
+                for other in group[index + 1:]:
+                    bounds = other["gridPos"]
+                    self.assertTrue(
+                        position["x"] + position["w"] <= bounds["x"]
+                        or bounds["x"] + bounds["w"] <= position["x"]
+                        or position["y"] + position["h"] <= bounds["y"]
+                        or bounds["y"] + bounds["h"] <= position["y"],
+                        f"Panels {panel['id']} and {other['id']} overlap",
+                    )
+
+    def test_all_queries_preserve_filtering_and_deduplication(self) -> None:
+        for panel in self.panels:
+            for target in panel.get("targets", []):
+                with self.subTest(panel=panel["id"]):
+                    source = target["azureLogAnalytics"]
+                    query = source["query"]
+                    self.assertEqual(source["resources"], ["__WORKSPACE_RESOURCE_ID__"])
+                    self.assertFalse(source["dashboardTime"])
+                    self.assertIn("${project:singlequote}", query)
+                    self.assertIn("$__timeFilter(TimeGenerated)", query)
+                    if query.startswith("OTelSpans"):
+                        self.assertIn("ago(30d)", query)
+                        self.assertIn(
+                            "tostring(Attributes['telemetry.origin']) == 'unverified_client'",
+                            query,
+                        )
+                        deduplication = "summarize arg_max(TimeGenerated, *) by TraceId, SpanId"
+                        self.assertNotRegex(query, r"(?i)\bsum(?:if)?\s*\(")
+                    else:
+                        self.assertTrue(query.startswith("CopilotAssessments_CL"))
+                        self.assertIn("ago(90d)", query)
+                        self.assertIn("Origin != 'synthetic_azure_model_smoke'", query)
+                        self.assertIn(
+                            "summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision",
+                            query,
+                        )
+                        deduplication = "summarize arg_max(Revision, *) by Origin, ProjectId, SessionId"
+                    self.assertLess(query.index(deduplication), query.index("$__timeFilter"))
+                    if source["resultFormat"] == "time_series":
+                        self.assertEqual(source["timeColumn"], "TimeGenerated")
+                        self.assertIn("by bin(TimeGenerated, $__interval)", query)
+                        self.assertTrue(query.endswith("| order by TimeGenerated asc"))
+
+
 @unittest.skipUnless(shutil.which("az"), "Azure CLI is required for infrastructure tests")
 class InfrastructureTests(unittest.TestCase):
     @classmethod
@@ -48,9 +121,13 @@ class InfrastructureTests(unittest.TestCase):
         definition = self.resources["Microsoft.Dashboard/dashboards/dashboardDefinitions"]
         self.assertIn("serializedData", definition["properties"])
         dashboard = json.loads((ROOT / "dashboards/copilot-pilot.json").read_text())
-        missing_telemetry = next(panel for panel in dashboard["panels"] if panel["id"] == 4)
+        panels = [
+            child for panel in dashboard["panels"]
+            for child in ([panel] + panel.get("panels", []))
+        ]
+        missing_telemetry = next(panel for panel in panels if panel["id"] == 4)
         self.assertIn("not collecting", missing_telemetry["title"])
-        for panel in dashboard["panels"]:
+        for panel in panels:
             for target in panel.get("targets", []):
                 query = target["azureLogAnalytics"]["query"]
                 self.assertIn("$__timeFilter(TimeGenerated)", query)

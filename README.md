@@ -82,6 +82,15 @@ managed identity. Provisioning installs the repo-backed
 selection still need a signed-in portal check. Real usage is explicitly unavailable
 until real-client accounting and project identity are verified.
 
+The local dashboard definition now has four headline cards (assessed sessions,
+observed spans, model labels seen, and last observed span), an activity trend,
+an operation breakdown, and assessment summaries. Freshness/raw-span tables and
+longer pilot notes live in collapsed rows. Blue/teal accents distinguish the
+overview without implying verified usage or collector health. All data panels
+respect the project/time filters; existing 90-day assessment and 30-day span
+lookback limits still apply. The visual refresh is not deployed until the
+dashboard definition is provisioned again; signed-in rendering remains to be checked.
+
 Local `.env` and `.azure/` configuration stay ignored. Commit templates and
 non-secret examples, not environment outputs, credentials, or raw histories.
 Ingestion/storage/query costs still apply even though the portal Grafana
