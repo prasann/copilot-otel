@@ -1,8 +1,7 @@
 # Feasibility and acceptance checks
 
-Current implementation: [README](README.md).
-Remaining requirements: [PLAN](PLAN.md).
-Execution status: [pilot checklist](specs/session-reflection/tasks.md).
+Current implementation and remaining work: [README](README.md#current-status).
+Operational boundaries: [daily session reflection](docs/session-reflection.md).
 
 ## Evidence so far
 

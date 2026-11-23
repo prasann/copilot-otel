@@ -2,8 +2,10 @@
 
 ## What you can do now
 
-Prepare Azure access and the existing model deployment, then preview and
-provision the monitoring baseline using section 5. Offline tests do not connect
+Azure deployment, including the latest dashboard refresh, was confirmed complete
+by the user on **23 November 2026**. For a new environment or an update, prepare
+Azure access and the existing model deployment, then preview and provision the
+monitoring baseline using section 5. Offline tests do not connect
 to Azure. A separate explicit synthetic runner/publisher
 connects to Azure. A native macOS collector supports metadata-only traces.
 VS Code Insiders settings were configured globally; reload and real-client
@@ -15,8 +17,8 @@ real-session inference has not been tested.
 The pilot's first model request and reviewed summary upload/query-back succeeded.
 Dashboard definitions and project/time-filtered KQL were verified through CLI.
 Earlier dashboard rendering and datasource access were user-confirmed. The latest
-visual refresh still needs provisioning and a portal check. Progress is tracked
-in the [pilot checklist](../specs/session-reflection/tasks.md).
+visual refresh is deployed; rendering and portal controls still need verification. Progress is tracked
+in the [README status and pending checklist](../README.md#current-status).
 
 [azure.yaml](../azure.yaml) uses [infra/main.bicep](../infra/main.bicep) and
 [infra/core.bicep](../infra/core.bicep). They now provision Log Analytics,
@@ -225,9 +227,10 @@ provisioning. The deployed dashboard is tagged for that gallery and includes
 assessment summaries, span activity, model labels, operation counts, and collapsed
 freshness/raw-span details with explicit unverified-accounting notes. Synthetic
 smoke records are excluded from dashboard queries. Earlier synthetic assessment
-and span samples were deleted and query-verified absent; see the
-[pilot checklist](../specs/session-reflection/tasks.md) for the residual
-service-name-only resource-row caveat.
+and span samples were deleted and query-verified absent. One service-name-only
+resource lookup row remained after Azure rejected its ID filter and an exact
+timestamp operation matched zero rows. It contains no token counts, prompts, or
+conversation data and is not shown in the dashboard.
 [The JSON definition](../dashboards/copilot-pilot.json) is deployed through
 the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resource
 (`2025-09-01-preview`), not unsupported properties on the parent. Check browser
@@ -253,7 +256,7 @@ summary query-back, verified usage totals, and actual scheduling/wake acceptance
 The local retention/schedule implementation is covered by isolated tests and the
 job is installed; actual wake behavior remains untested. Cloud assessment retention is configured
 here; no native client history is deleted. Use the
-[pilot checklist](../specs/session-reflection/tasks.md) for current progress and
+[README pending checklist](../README.md#pending-acceptance) for current progress and
 the [README smoke commands](../README.md#azure-synthetic-smoke) to repeat the bounded
 synthetic connection test.
 

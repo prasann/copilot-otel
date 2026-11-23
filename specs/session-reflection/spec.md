@@ -1,6 +1,6 @@
 # Synthetic session assessment contract
 
-Remaining worker requirements: [PLAN.md](../../PLAN.md).
+Implementation and pending work: [README](../../README.md#current-status).
 Feasibility gates: [SPIKES.md](../../SPIKES.md).
 
 ## Objective
@@ -127,7 +127,7 @@ The user subsequently chose a basic working pilot before full evaluation. One
 synthetic Azure model smoke succeeded; that is not a pass of the scoring procedure
 above. The full comparison and longer-input testing remain outstanding. Recorded
 real-content approval is limited to the bounded pilot in the
-[current checklist](tasks.md); these tools still accept only authored fixtures.
+[operating guide](../../docs/session-reflection.md); these tools still accept only authored fixtures.
 
 ## Azure synthetic runner configuration
 

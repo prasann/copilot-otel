@@ -4,6 +4,55 @@ Metadata-only Copilot telemetry and evidence-backed session assessments in one
 authenticated Azure Monitor dashboard with Grafana. Native macOS collector,
 Python tools, and `azd`/Bicep infrastructure. No Docker or dedicated Grafana server.
 
+## Current status
+
+**Working pilot; live acceptance is incomplete.** Implementation and offline
+regression tests are in place. Recorded Azure checks used synthetic data; they
+do not establish real-client delivery, real-session assessment quality, or
+current service health.
+
+| Area | Implemented / recorded evidence | Still pending |
+| --- | --- | --- |
+| Session reflection | Read-only native capture, bounded worker, retention, daily scheduling, reviewed-summary publisher | First eligible real capture, assessment, and published-summary query-back |
+| Metadata telemetry | Native macOS collector, filtering before disk queue, synthetic privacy and Azure query-back checks | Insiders reload and real-span delivery; project attribution and usage accounting |
+| Azure dashboard | Monitoring baseline and latest dashboard deployed (user-confirmed); initial query checks and earlier rendering confirmed | Verify latest rendering and portal controls |
+| Assessment quality | Rubric, schemas, separate evaluation fixtures, one bounded Azure synthetic model call | Repeated scored evaluation, longer inputs, local/Azure comparison |
+
+The last recorded pilot setup on **23 November 2026** enabled reflection for new
+archived sessions under the approved projects root, including future projects,
+and installed **Copilot Daily Session Review**. Its first run was scheduled for
+**24 November at 09:00 local**; no real-session model request had been made.
+Insiders metadata export was also configured globally, but real-span arrival
+was not verified. These are recorded setup results, not a live health report.
+New installations keep inference and scheduling disabled until explicitly enabled.
+
+Azure deployment, including the latest dashboard refresh, was confirmed complete
+on **23 November 2026**. Live acceptance checks below remain separate.
+
+### Pending acceptance
+
+- [ ] Inspect a new archived session's metadata-only preview, review its first
+  local assessment, then publish and query back a human-reviewed derived summary.
+- [ ] Verify capture identity and eligibility after a full editor/host restart,
+  including cancellation, resume, and publication timing.
+- [ ] Observe a real 09:00 run, sleep/wake or login catch-up, and worker recovery.
+- [ ] Reload Insiders and verify native spans in Azure.
+- [ ] Check the deployed dashboard's rendering and project/time filters.
+- [ ] Prove project identity and reconcile concurrent projects, subagent overlap,
+  and replay against known totals before adding usage or delivery/error panels.
+- [ ] Test queue crash/replay, offline recovery, permanent rejection, expired
+  Azure CLI authentication, and saturation.
+- [ ] Test a separate least-privilege reader and an unauthorized identity.
+- [ ] Complete the [assessment-quality evaluation](specs/session-reflection/spec.md#frozen-evaluation-set-and-scoring-procedure)
+  and longer-input tests. One synthetic result overstated evidence of a parser
+  fix; successful validation is not quality certification.
+- [ ] Validate other clients, multi-chat/subagent/compacted histories, remote
+  sessions, and multi-machine coverage before expanding support.
+
+See [feasibility and acceptance checks](SPIKES.md) for detailed criteria and
+[capture findings](docs/spikes/session-capture-findings.md) for the tested source
+contract. Usage totals and broader rollout remain deferred, not completed.
+
 ## Architecture today
 
 ```mermaid
@@ -37,18 +86,6 @@ queueing traces. The real-session worker reads only new, allowlisted archived se
 and scheduling require explicit activation. Model inference uses a separately configured existing Azure
 deployment; Bicep does not create or manage it.
 
-| Available | Not yet verified or implemented |
-| --- | --- |
-| Read-only capture, bounded local assessment worker, retention, and schedule commands | First real-session model run and actual sleep/wake acceptance |
-| Native macOS collector and synthetic privacy/query-back checks | Real-client arrival after reload; project identity and usage accounting |
-| Azure infrastructure and repo-backed dashboard | Queue crash/replay durability and broader access-control tests |
-| Reviewed-summary publisher and offline regression fixtures | Live real-summary query-back and full assessment-quality evaluation |
-
-Recorded pilot checks confirm deployment and earlier dashboard rendering, not
-the current live state. The latest visual refresh needs provisioning and a portal
-check. Insiders metadata export was configured globally; reload and real-span
-verification remain pending. See the [pilot checklist](specs/session-reflection/tasks.md).
-
 ## Try it locally
 
 Requires Python 3.11+. Run from the repository root:
@@ -60,8 +97,7 @@ python3 -m venv .venv
 ```
 
 Tests use authored fixtures and isolated native stores. They do not read real
-history, call models, upload data, or install services. The standalone synthetic
-demo and its unused folder mapper have been removed.
+history, call models, upload data, or install services.
 
 Infrastructure tests compile Bicep if Azure CLI is present; its Bicep compiler
 must also be installed. The native-binary privacy test runs only if the pinned
@@ -197,21 +233,9 @@ or an exact project ID; refresh is five minutes.
 
 ## Daily session reflection
 
-```mermaid
-flowchart LR
-  History[("Native session history<br/>read-only")]
-  Capture["Version-gated capture<br/>explicit archive + no active run"]
-  Worker["Bounded assessment<br/>local results only"]
-  Review["Human reviews derived summary"]
-  Publish["Explicit publish command"]
-  History --> Capture --> Worker --> Review --> Publish
-```
-
-**Implemented.** The current pilot is enabled for new sessions under the approved
-projects root, including future projects. Its **Copilot Daily Session Review**
-09:00 local job is installed, with
-the first assessment deferred until the next 09:00 run. No immediate model call
-was made. New installations start disabled; initialize their local policy once:
+The worker reads only new, explicitly archived, inactive sessions from the tested
+local VS Code Agent Host default-chat source. Results stay local until reviewed
+and explicitly published. Initialize a new installation's policy once:
 
 ```bash
 .venv/bin/python -m tools.session_reflection init \
@@ -230,18 +254,20 @@ projects tree in one step, including future projects:
 ```
 
 Root expansion gets its own fresh cutoff without resetting earlier approvals or
-the budget. Preview prints IDs, counts, and
-eligibility reasons, **not conversation text**, and makes no model calls.
+the budget. Preview prints IDs, counts, and eligibility reasons, **not conversation
+text**, and makes no model calls.
 
-The worker allows at most **5 attempts per local day**, **20,000 characters for
-the entire request**, and **2,000 output tokens per request**. Oversized/uncertain
-sessions are deferred; failed or interrupted attempts are not automatically
-retried. Results stay local. Model limits are not a monetary cap.
+All approved projects share **5 attempts per local day**, **20,000 characters for
+the entire request**, and **2,000 output tokens per request**. Oversized or
+uncertain sessions are deferred; failed or interrupted attempts are not
+automatically retried. Owned snapshots expire after 30 days, results/receipts
+after 90 days; reflection state is capped at 64 MiB. Native history is untouched.
+These limits are not a monetary cap.
 
-After scope/preview review, activation and the optional 09:00 local job are separate
-commands. See [the operating guide](docs/session-reflection.md) for activation,
-reviewed publishing, stop/uninstall, retained data, and limitations. No daily
-job or real-model request is enabled merely by installing this code.
+Follow [the operating guide](docs/session-reflection.md) for content scope,
+explicit activation, the optional 09:00 local job, reviewed publishing, and
+stop/uninstall commands. Installing the code alone enables neither inference nor
+the job. Scheduling does not wake the Mac or automatically upload results.
 
 ## Repository map
 
@@ -252,7 +278,9 @@ job or real-model request is enabled merely by installing this code.
 | [infra/](infra/) | Azure resources and scoped RBAC |
 | [dashboards/copilot-pilot.json](dashboards/copilot-pilot.json) | Single current dashboard |
 | [tests/](tests/) | Assessment, attribution, collector, dashboard, and Bicep checks |
-| [specs/session-reflection/](specs/session-reflection/) | Rubric, schemas, fixtures, evaluation contract, pilot checklist |
+| [specs/session-reflection/](specs/session-reflection/) | Rubric, schemas, fixtures, and assessment evaluation contract |
+| [docs/](docs/) | Azure setup, reflection operations, and capture findings |
+| [SPIKES.md](SPIKES.md) | Recorded feasibility evidence and detailed acceptance criteria |
 
 Older Docker/content-capture and branch-mapping experiments have been removed;
 Git history retains them. Removing files does not remove older Azure resources.
