@@ -175,7 +175,29 @@ It runs after login; sleeping or logging out can interrupt collection.
 ### Connect VS Code Insiders
 
 Use these application-wide settings only for the metadata scope you intend to
-collect. They apply across projects:
+collect. They apply across projects. Agent Host and the Copilot Chat extension
+have separate telemetry configuration; enabling one does not enable the other.
+
+For **Agent Host sessions** (including Copilot SDK chats), use:
+
+```json
+{
+  "chat.agentHost.otel.enabled": true,
+  "chat.agentHost.otel.exporterType": "otlp-http",
+  "chat.agentHost.otel.otlpEndpoint": "http://127.0.0.1:4318",
+  "chat.agentHost.otel.captureContent": false,
+  "chat.agentHost.otel.captureIdentity": false,
+  "chat.agentHost.otel.outfile": "",
+  "chat.agentHost.otel.dbSpanExporter.enabled": false
+}
+```
+
+Fully quit and reopen Insiders after changing Agent Host telemetry settings;
+reloading a window can leave the shared host running with its old startup
+configuration. Use a new controlled session to verify delivery. These settings
+cover Agent Host providers, not only the Copilot Chat extension.
+
+For **Copilot Chat extension telemetry**, use:
 
 ```json
 {
@@ -190,9 +212,10 @@ collect. They apply across projects:
 }
 ```
 
-Run **Developer: Reload Window**, then use a new session. Environment or enterprise
-settings may override these values; verify actual records. CLI, Stable, and desktop
-clients need separate configuration and verification.
+Run **Developer: Reload Window** after changing the extension settings, then use
+a new session. Environment or enterprise settings may override either
+configuration; verify actual records. CLI, Stable, and desktop clients need
+separate configuration and verification.
 
 ### Check delivery and control the service
 
@@ -255,9 +278,12 @@ chmod 600 /absolute/path/to/attribution-policy.json
 
 The gateway runs **in the foreground**; keep that terminal open. It is not
 installed as a login service. In another terminal, check
-`curl --fail http://127.0.0.1:4319/health`, then change only
-`github.copilot.chat.otel.otlpEndpoint` to `http://127.0.0.1:4319` and reload
-Insiders. Health checks prove local reachability, not Azure delivery or complete
+`curl --fail http://127.0.0.1:4319/health`, then set the endpoint for the client
+you enabled above to `http://127.0.0.1:4319`: use
+`chat.agentHost.otel.otlpEndpoint` for Agent Host, or
+`github.copilot.chat.otel.otlpEndpoint` for the extension. Fully quit and reopen
+Insiders for Agent Host changes; reload the window for extension-only changes.
+Health checks prove local reachability, not Azure delivery or complete
 identity coverage. Policy is loaded at gateway startup; policy changes require
 restarting the gateway and reinstalling the collector with the updated policy.
 The dedicated receiver trusts local processes; loopback is not an authentication
@@ -286,8 +312,9 @@ status/reason columns are already deployed and read-back/query verified; renderi
 remains pending. New environments still require a separately reviewed
 infrastructure deployment; installing the gateway does not deploy dashboard changes.
 
-To disable: restore the client endpoint to `http://127.0.0.1:4318`, reload, stop
-the gateway with Ctrl-C, then stop/reinstall the collector without
+To disable: restore each enabled client's endpoint to `http://127.0.0.1:4318`,
+restart Insiders for Agent Host changes (or reload for extension-only changes),
+stop the gateway with Ctrl-C, then stop/reinstall the collector without
 `--attribution-policy`. Historical Azure records are unchanged.
 
 ## Azure synthetic smoke
