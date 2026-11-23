@@ -137,7 +137,11 @@ After provisioning the same `azd` environment and signing into Azure CLI:
 ```
 
 Installation downloads a SHA256-checked, pinned official collector and creates a
-user LaunchAgent. It does **not** configure any Copilot client. The synthetic
+user LaunchAgent. Its executable is named **Copilot Telemetry Collector**;
+the version is kept in its parent directory rather than the display name.
+Reinstalling a stopped earlier pilot migrates the existing pinned executable
+without downloading it again and retains configuration, queue, and logs.
+It does **not** configure any Copilot client. The synthetic
 command makes no model call; it tests two spans, including deliberately invalid
 metadata and prohibited-content canaries. Retry only query-back if ingestion is
 still propagating; do not resend to work around query lag.

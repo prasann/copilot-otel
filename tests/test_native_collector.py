@@ -18,6 +18,33 @@ ENDPOINT = ("https://synthetic.southindia-1.ingest.monitor.azure.com/"
 
 
 class NativeCollectorTests(unittest.TestCase):
+    def test_existing_install_migrates_to_friendly_name_without_redownload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = root / "bin" / f"otelcol-contrib-{collector.VERSION}"
+            legacy.parent.mkdir()
+            legacy.write_bytes(b"existing-pinned-collector")
+            legacy.chmod(0o700)
+            plist = root / "collector.plist"
+            launch = {"Label": collector.LABEL,
+                      "ProgramArguments": [str(legacy), "--config", str(root / "collector.json")]}
+            plist.write_bytes(plistlib.dumps(launch))
+            with patch.object(collector, "HOME", root), patch.object(collector, "PLIST", plist), \
+                    patch.object(collector.platform, "machine", return_value="arm64"), \
+                    patch.object(collector, "run", return_value=f"otelcol-contrib {collector.VERSION}"), \
+                    patch.object(collector.urllib.request, "urlopen") as download:
+                collector.check_owned_plist()
+                binary = collector.download(root)
+                self.assertEqual(binary.name, "Copilot Telemetry Collector")
+                self.assertEqual(binary.read_bytes(), b"existing-pinned-collector")
+                self.assertEqual(binary.stat().st_mode & 0o777, 0o700)
+                self.assertFalse(legacy.exists())
+                launch["ProgramArguments"][0] = str(binary)
+                plist.write_bytes(plistlib.dumps(launch))
+                collector.check_owned_plist()
+                self.assertEqual(collector.download(root), binary)
+                download.assert_not_called()
+
     def test_unrecognized_launchagent_is_rejected_before_install_side_effects(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plist = Path(directory) / "existing.plist"
@@ -47,6 +74,17 @@ class NativeCollectorTests(unittest.TestCase):
                 collector.start()
             stop.assert_called_once()
             self.assertEqual(run.call_args.args[0][:2], ["launchctl", "bootstrap"])
+
+    def test_stop_waits_for_launchd_to_finish_unloading(self) -> None:
+        with patch.object(collector, "check_owned_plist"), \
+                patch.object(collector, "PLIST") as plist, \
+                patch.object(collector, "service_loaded", side_effect=[True, True, False]), \
+                patch.object(collector, "run") as run, \
+                patch.object(collector.time, "sleep") as sleep:
+            plist.exists.return_value = True
+            collector.stop()
+            self.assertEqual(run.call_args.args[0][:2], ["launchctl", "bootout"])
+            sleep.assert_called_once_with(0.25)
 
     def test_launchd_permission_error_is_not_treated_as_missing_service(self) -> None:
         result = subprocess.CompletedProcess(["launchctl"], 1, "", "permission denied")
@@ -90,7 +128,7 @@ class NativeCollectorTests(unittest.TestCase):
                     collector.query_smoke(receipt)
 
     def test_pinned_binary_removes_content_and_invalid_metadata_values(self) -> None:
-        binary = collector.HOME / "bin" / f"otelcol-contrib-{collector.VERSION}"
+        binary = collector.HOME / collector.BINARY_PATH
         if not binary.exists():
             self.skipTest("Pinned native collector is not installed; no download performed")
         with tempfile.TemporaryDirectory() as directory:

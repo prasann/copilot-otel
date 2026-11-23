@@ -24,6 +24,7 @@ from tools.azure_pilot import ROOT, azd_value, rest
 
 
 VERSION = "0.165.0"
+BINARY_PATH = Path("bin") / VERSION / "Copilot Telemetry Collector"
 ARCHIVES = {
     "arm64": "f9a0ed310e9beeb0fabca9d9c24bd0d3467f6339e3207710dbd66a6adf1298f6",
     "amd64": "7d14e5c14bcb930d55f2bd5d3fbb3734be5fd2889698488e65e488efda5473c9",
@@ -72,11 +73,16 @@ def download(directory: Path) -> Path:
     arch = {"arm64": "arm64", "x86_64": "amd64"}.get(platform.machine())
     if not arch:
         raise ValueError("Supported architectures are macOS arm64 and x86_64")
-    binary = directory / "bin" / f"otelcol-contrib-{VERSION}"
-    if binary.exists():
-        if VERSION not in run([str(binary), "--version"]):
-            raise ValueError("Existing collector version does not match the pin")
-        return binary
+    binary = directory / BINARY_PATH
+    legacy = directory / "bin" / f"otelcol-contrib-{VERSION}"
+    for installed in (binary, legacy):
+        if installed.exists():
+            if VERSION not in run([str(installed), "--version"]):
+                raise ValueError("Existing collector version does not match the pin")
+            if installed != binary:
+                binary.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                installed.rename(binary)
+            return binary
     binary.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = f"otelcol-contrib_{VERSION}_darwin_{arch}.tar.gz"
     url = ("https://github.com/open-telemetry/opentelemetry-collector-releases/"
@@ -105,9 +111,11 @@ def check_owned_plist() -> None:
     if PLIST.exists():
         with PLIST.open("rb") as source:
             existing = plistlib.load(source)
-        expected = [str(HOME / "bin" / f"otelcol-contrib-{VERSION}"),
-                    "--config", str(HOME / "collector.json")]
-        if existing.get("Label") != LABEL or existing.get("ProgramArguments") != expected:
+        expected = [
+            [str(HOME / path), "--config", str(HOME / "collector.json")]
+            for path in (BINARY_PATH, Path("bin") / f"otelcol-contrib-{VERSION}")
+        ]
+        if existing.get("Label") != LABEL or existing.get("ProgramArguments") not in expected:
             raise ValueError("Refusing to modify an unrecognized LaunchAgent")
 
 
@@ -129,6 +137,11 @@ def stop() -> None:
         if not PLIST.exists():
             raise ValueError("Refusing to stop a service without its owned LaunchAgent")
         run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"])
+        for _ in range(40):
+            if not service_loaded():
+                return
+            time.sleep(0.25)
+        raise RuntimeError("Collector service did not finish unloading within 10 seconds")
 
 
 def start() -> dict[str, str]:

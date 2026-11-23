@@ -45,6 +45,7 @@ Real-history inference requires separate approval; this checklist does not enabl
 - [ ] Add local retention: owned source snapshots 30 days, assessments 90 days; never delete native history.
 - [ ] Add repeatable install/uninstall scripts and launchd jobs; verify startup and health.
   - [x] Add collector install/start/stop/status/uninstall commands; verify repeated uninstall and healthy reinstall. Failed readiness unloads the job; unrecognized plists are rejected.
+  - [x] Rename the background executable to **Copilot Telemetry Collector**, keeping the version in its parent directory. Migrate the existing executable unchanged without redownload; verify launchd, process name, health, and seven collector regression tests.
 
 ## 5. Start one real-project pilot
 
