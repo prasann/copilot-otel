@@ -6,18 +6,19 @@ Azure deployment, including the earlier dashboard refresh, was confirmed complet
 by the user on **23 November 2026**. For a new environment or an update, prepare
 Azure access and the existing model deployment, then preview and provision the
 monitoring baseline using section 5. Offline tests do not connect
-to Azure. A separate explicit synthetic runner/publisher
-connects to Azure. A native macOS collector supports metadata-only traces.
+to Azure. Optional manual synthetic diagnostics are documented separately in
+[troubleshooting](troubleshooting.md#manual-synthetic-diagnostics); they are not
+part of routine setup or operation. A native macOS collector supports metadata-only traces.
 The [opt-in attribution gateway](../README.md#opt-in-project-attribution) is
 running in the background for `personal/copilot-otel` only; the Insiders endpoint
-is saved, with editor reload and real attributed query-back still pending.
+is saved, and real-session attribution was queried back from Azure and
+user-confirmed visible in the dashboard after a full Insiders restart.
 The gateway does not restart automatically after logout/reboot. Its dashboard
 diagnostic columns were deployed separately, preserving portal identity/title,
 and definition read-back plus the updated Azure query passed. The full
 `azd provision --preview` also proposed Application Insights property changes,
 so that full plan was not applied. Two-project live acceptance remains pending.
-VS Code Insiders settings were configured globally; reload and real-client
-verification remain pending. The [real-session worker](session-reflection.md) is
+VS Code Insiders settings were configured globally. The [real-session worker](session-reflection.md) is
 implemented and explicitly enabled for the pilot's approved projects root. Its
 first scheduled assessment is deferred until the next 09:00 local run; live
 real-session inference has not been tested.
@@ -25,7 +26,9 @@ real-session inference has not been tested.
 The pilot's first model request and reviewed summary upload/query-back succeeded.
 Dashboard definitions and project/time-filtered KQL were verified through CLI.
 Earlier dashboard rendering and datasource access were user-confirmed. The latest
-visual refresh is deployed; rendering and portal controls still need verification. Progress is tracked
+attribution view was user-confirmed. The usage-first token layout was subsequently
+deployed with live query and definition read-back verification; its rendering and
+project/time filter interaction still need browser verification. Progress is tracked
 in the [README status and pending checklist](../README.md#current-status).
 
 [azure.yaml](../azure.yaml) uses [infra/main.bicep](../infra/main.bicep) and
@@ -107,7 +110,7 @@ into an issue/chat: deployment outputs can contain connection strings.
   do not assume the same role/audience works everywhere.
 - [ ] Ensure the endpoint is reachable from this Mac. If it is private-network
   only, confirm the required VPN/private DNS route instead of opening it publicly.
-- [ ] Set deployment rate/token limits appropriate to the small synthetic test.
+- [ ] Set deployment rate/token limits appropriate to the approved workload.
   These limits are not monetary caps.
 
 Create a local `.env` from [.env.example](../.env.example) only if one does not
@@ -128,9 +131,9 @@ Do not add an API key or store an access token. Leave inference disabled until
 the runner and endpoint compatibility checks are ready. Current offline tools
 do not load this file; filling it does not start inference.
 
-The first approved model test is one synthetic smoke request, with no automatic
-retries and a 2,000-token output ceiling. The 16-attempt ledger limit remains a
-safety ceiling; the full eight-case/two-run evaluation is deferred.
+The earlier approved model test used one synthetic smoke request. Repeating it
+is optional troubleshooting, not an acceptance prerequisite. Its 16-attempt
+ledger limit remains a safety ceiling; the full eight-case/two-run evaluation is deferred.
 Input tokens and any model-specific reasoning accounting also affect cost.
 No real chat history is authorized by this setup.
 
@@ -232,8 +235,10 @@ events automatically and is not approved for real histories.
 
 Open the Application Insights resource > **Dashboards with Grafana** after
 provisioning. The deployed dashboard is tagged for that gallery and includes
-assessment summaries, span activity, model labels, operation counts, and collapsed
-freshness/raw-span details with explicit unverified-accounting notes. Synthetic
+observed input/output/cache-read tokens, a token trend, project/model breakdowns,
+and collapsed assessment/freshness/raw-span details. Token sums use only
+deduplicated chat spans, not overlapping agent/tool totals, and are not billing
+or guaranteed complete usage. Synthetic
 smoke records are excluded from dashboard queries. Earlier synthetic assessment
 and span samples were deleted and query-verified absent. One service-name-only
 resource lookup row remained after Azure rejected its ID filter and an exact
@@ -259,30 +264,34 @@ review and clean up those resources separately. Only run `azd down` after
 confirming the selected environment contains exclusively disposable pilot
 resources. Never use it on an environment containing an existing/shared model.
 
-Still pending: real-client metadata verification, live real-history inference and
-summary query-back, verified usage totals, and actual scheduling/wake acceptance.
+Still pending: second-project metadata verification, live real-history inference
+and summary query-back, verified usage totals, and actual scheduling/wake acceptance.
 The local retention/schedule implementation is covered by isolated tests and the
 job is installed; actual wake behavior remains untested. Cloud assessment retention is configured
 here; no native client history is deleted. Use the
 [README pending checklist](../README.md#pending-acceptance) for current progress and
-the [README smoke commands](../README.md#azure-synthetic-smoke) to repeat the bounded
-synthetic connection test.
+the [troubleshooting guide](troubleshooting.md) only when diagnosing a failure.
 
 ## 6. End-to-end acceptance order
 
-1. Verify synthetic local aggregation and attribution without Azure.
-2. Run the synthetic model evaluation with CLI authentication; record errors
-   and manually review quality, not just JSON validity.
-3. Send a small synthetic metadata/assessment batch to Azure; query stored
-   fields and verify prohibited content is absent.
-4. Show both streams in one dashboard with the same project/time filters.
-   The production dashboard excludes synthetic smoke rows; use explicit query-back
-   for those tests. Keep unattributed spans visible; do not sum unverified tokens.
+1. Run offline fixture-backed regression tests without Azure uploads.
+2. Use controlled real-client telemetry from explicitly approved projects.
+   Query back exact session identities and project aliases, and verify prohibited
+   content is absent. Repeat with a second approved project; synthetic records
+   cannot establish real-client attribution.
+3. Separately approve real-history assessment, inspect the first eligible local
+   result, then publish and query back a human-reviewed derived summary. Review
+   quality, not just JSON validity.
+4. Verify real telemetry and published assessments in the dashboard with the
+   same project/time filters. Keep unattributed spans visible; do not sum
+   unverified tokens. Explicitly tagged synthetic smoke rows remain excluded.
 5. Verify an authorized reader can view the data, an unauthorized identity
    cannot query it, and there is no anonymous dashboard route.
-6. Only then enable a controlled real-client telemetry sample. Source identity,
-   worktree attribution, and accounting deduplication need independent proof.
-   Real-history assessment remains a separate approval.
+
+Use manual synthetic diagnostics only to isolate a specific infrastructure,
+authentication, exporter, or model-endpoint failure. Do not schedule them or
+require new synthetic uploads for routine acceptance. Leave existing synthetic
+rows to expire under configured retention instead of routinely purging them.
 
 If you encounter a failure, share the command and sanitized error, not
 `azd env get-values`, token output, or connection strings.

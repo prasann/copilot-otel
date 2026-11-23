@@ -23,7 +23,7 @@ class DashboardTests(unittest.TestCase):
     def test_overview_keeps_details_collapsed_and_layout_non_overlapping(self) -> None:
         overview = self.dashboard["panels"]
         self.assertEqual(sum(panel["type"] == "stat" for panel in overview), 4)
-        self.assertTrue({"timeseries", "bargauge", "table"} <= {
+        self.assertTrue({"timeseries", "table"} <= {
             panel["type"] for panel in overview
         })
         self.assertEqual(len({panel["id"] for panel in self.panels}), len(self.panels))
@@ -66,7 +66,11 @@ class DashboardTests(unittest.TestCase):
                             query,
                         )
                         deduplication = "summarize arg_max(TimeGenerated, *) by TraceId, SpanId"
-                        self.assertNotRegex(query, r"(?i)\bsum(?:if)?\s*\(")
+                        if "sum(" in query:
+                            chat_filter = "where tostring(Attributes['gen_ai.operation.name']) == 'chat'"
+                            self.assertIn(chat_filter, query)
+                            self.assertLess(query.index(deduplication), query.index(chat_filter))
+                            self.assertLess(query.index(chat_filter), query.index("sum("))
                     else:
                         self.assertTrue(query.startswith("CopilotAssessments_CL"))
                         self.assertIn("ago(90d)", query)
@@ -81,6 +85,34 @@ class DashboardTests(unittest.TestCase):
                         self.assertEqual(source["timeColumn"], "TimeGenerated")
                         self.assertIn("by bin(TimeGenerated, $__interval)", query)
                         self.assertTrue(query.endswith("| order by TimeGenerated asc"))
+
+    def test_usage_panels_keep_missing_reporting_distinct_from_zero(self) -> None:
+        panels = {panel["id"]: panel for panel in self.panels}
+        for panel_id, fields in (
+            (6, ("InputTokens",)), (7, ("OutputTokens",)), (8, ("CacheReadTokens",)),
+            (10, ("InputTokens", "OutputTokens", "CacheReadTokens")),
+            (2, ("InputTokens", "OutputTokens", "CacheReadTokens")),
+            (11, ("InputTokens", "OutputTokens", "CacheReadTokens")),
+        ):
+            query = panels[panel_id]["targets"][0]["azureLogAnalytics"]["query"]
+            for field in fields:
+                self.assertIn(
+                    f"{field}=iff(countif(isnotnull({field})) > 0, sum({field}), long(null))",
+                    query,
+                )
+            if panel_id in (2, 11):
+                self.assertIn(
+                    "MissingUsage=countif(isnull(InputTokens) or isnull(OutputTokens))", query,
+                )
+                self.assertIn("MissingCache=countif(isnull(CacheReadTokens))", query)
+        project_query = panels[2]["targets"][0]["azureLogAnalytics"]["query"]
+        self.assertIn("by ProjectId", project_query)
+        self.assertNotIn("!= 'unattributed'", project_query)
+        self.assertIn("by Model", panels[11]["targets"][0]["azureLogAnalytics"]["query"])
+        self.assertTrue(any(
+            child["id"] == 15 for panel in self.dashboard["panels"]
+            if panel["type"] == "row" and panel["collapsed"] for child in panel["panels"]
+        ))
 
 
 @unittest.skipUnless(shutil.which("az"), "Azure CLI is required for infrastructure tests")
@@ -126,7 +158,7 @@ class InfrastructureTests(unittest.TestCase):
             for child in ([panel] + panel.get("panels", []))
         ]
         missing_telemetry = next(panel for panel in panels if panel["id"] == 4)
-        self.assertIn("not collecting", missing_telemetry["title"])
+        self.assertIn("limits", missing_telemetry["title"])
         for panel in panels:
             for target in panel.get("targets", []):
                 query = target["azureLogAnalytics"]["query"]

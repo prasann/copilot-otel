@@ -218,4 +218,6 @@ and broader quality/access testing still require live acceptance.**
 
 Synthetic assessment fixtures remain as regression tests. The standalone demo
 has been removed; optional synthetic Azure/collector smoke commands remain only
-as diagnostics until the real path is accepted.
+as [manual troubleshooting diagnostics](troubleshooting.md#manual-synthetic-diagnostics),
+not routine uploads or substitutes for real-session acceptance. Existing
+synthetic cloud records expire under configured retention.

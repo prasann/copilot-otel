@@ -1,9 +1,9 @@
 {
   "uid": "copilot-reflection-pilot",
   "title": "Copilot reflection and telemetry - pilot",
-  "description": "Derived assessments and filtered native telemetry. Project attribution is opt-in with live acceptance pending; usage accounting remains unverified.",
+  "description": "Observed chat tokens by project and model, with reviewed assessments and telemetry diagnostics below. Not billing or complete usage accounting.",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "editable": true,
   "timezone": "browser",
   "time": {"from": "now-7d", "to": "now"},
@@ -37,18 +37,18 @@
       "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
       "options": {
         "mode": "markdown",
-        "content": "### Reflection + activity\nReviewed assessments and metadata-only telemetry for the selected project and time range.\n\n**Accounting is unverified; opt-in attribution awaits live acceptance.** Spans are observations, not billable calls or token totals. Direct or unresolved spans stay `unattributed`. Daily assessment uses the separately enabled **Copilot Daily Session Review** job; results require reviewed publishing. Setup notes below are not live health signals."
+        "content": "### Project token usage\nObserved tokens from deduplicated **chat spans only**, filtered by project and time. Agent/tool spans are excluded from token sums to avoid overlapping totals. Cache reads are shown separately, not added to input tokens.\n\nThese are reported observations, **not billing or guaranteed complete usage**. Missing usage is shown in the tables; unresolved projects remain `unattributed`. Assessments and raw telemetry are collapsed below."
       }
     },
     {
       "id": 6,
-      "title": "Assessed sessions",
-      "description": "Latest assessment revision per origin, project and session, created within the selected time range. Synthetic Azure smoke assessments are excluded. This is not a count of all Copilot sessions.",
+      "title": "Observed input tokens",
+      "description": "Sum of reported input tokens on deduplicated chat spans only. Agent/tool spans are excluded. Missing values are not proof of zero usage; this is not billing.",
       "type": "stat",
       "gridPos": {"x": 0, "y": 3, "w": 6, "h": 4},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}, "unit": "short", "noValue": "No data"},
+        "defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
         "overrides": []
       },
       "options": {
@@ -65,51 +65,20 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize AssessedSessions=count()"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens'])\n| summarize InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null))"
           }
         }
       ]
     },
     {
       "id": 7,
-      "title": "Observed spans",
-      "description": "Deduplicated incoming spans, not validated usage or distinct model calls. The sparkline shows span arrivals over the selected range. Invocation and model-call spans may overlap.",
+      "title": "Observed output tokens",
+      "description": "Sum of reported output tokens on deduplicated chat spans only, not overlapping agent/tool spans. Not billing or guaranteed complete usage.",
       "type": "stat",
       "gridPos": {"x": 6, "y": 3, "w": 6, "h": 4},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}, "unit": "short", "noValue": "No spans"},
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value", "graphMode": "area", "justifyMode": "left",
-        "textMode": "value", "wideLayout": true,
-        "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-          "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
-            "dashboardTime": false,
-            "resultFormat": "time_series",
-            "timeColumn": "TimeGenerated",
-            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize Spans=count() by bin(TimeGenerated, $__interval)\n| order by TimeGenerated asc"
-          }
-        }
-      ]
-    },
-    {
-      "id": 8,
-      "title": "Model labels seen",
-      "description": "Distinct nonempty response-model labels on observed spans, not a count of models available or verified model calls.",
-      "type": "stat",
-      "gridPos": {"x": 12, "y": 3, "w": 6, "h": 4},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-      "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "#56D4C0"}, "unit": "short", "noValue": "No data"},
+        "defaults": {"color": {"mode": "fixed", "fixedColor": "#56D4C0"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
         "overrides": []
       },
       "options": {
@@ -126,7 +95,37 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| extend Model=tostring(Attributes['gen_ai.response.model'])\n| summarize ModelLabels=dcountif(Model, isnotempty(Model))"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens'])\n| summarize OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null))"
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Observed cache-read tokens",
+      "description": "Reported cache-read tokens from deduplicated chat spans. Shown separately; never added to input tokens. Missing cache reporting is not treated as zero.",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 3, "w": 6, "h": 4},
+      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "fixed", "fixedColor": "purple"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value", "graphMode": "none", "justifyMode": "left",
+        "textMode": "value", "wideLayout": true,
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "azureLogAnalytics": {
+            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null))"
           }
         }
       ]
@@ -163,27 +162,27 @@
     },
     {
       "id": 10,
-      "title": "Activity over time",
-      "description": "Deduplicated observed spans by start time. Counts describe telemetry volume only; overlapping invocation and model-call spans are not independent usage.",
+      "title": "Observed tokens over time",
+      "description": "Input, output, and cache-read observations from deduplicated chat spans, bucketed by span start time. Series are not stacked or added together; cache reads may overlap input.",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 7, "w": 16, "h": 8},
+      "gridPos": {"x": 0, "y": 7, "w": 24, "h": 8},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "fixed", "fixedColor": "blue"},
+          "color": {"mode": "palette-classic"},
           "unit": "short", "min": 0, "decimals": 0,
           "custom": {
             "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2,
             "fillOpacity": 15, "gradientMode": "opacity",
             "showPoints": "auto", "spanNulls": false,
-            "axisLabel": "Observed spans", "axisBorderShow": false
+            "axisLabel": "Reported tokens", "axisBorderShow": false
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {"showLegend": false},
-        "tooltip": {"mode": "single", "sort": "none"}
+        "legend": {"showLegend": true, "placement": "bottom"},
+        "tooltip": {"mode": "multi", "sort": "none"}
       },
       "targets": [
         {
@@ -195,30 +194,25 @@
             "dashboardTime": false,
             "resultFormat": "time_series",
             "timeColumn": "TimeGenerated",
-            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize Spans=count() by bin(TimeGenerated, $__interval)\n| order by TimeGenerated asc"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null)), OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null)), CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null)) by bin(TimeGenerated, $__interval)\n| order by TimeGenerated asc"
           }
         }
       ]
     },
     {
       "id": 11,
-      "title": "Observed operations",
-      "description": "Span counts grouped by operation label. Missing labels are shown explicitly. These are not verified call totals.",
-      "type": "bargauge",
-      "gridPos": {"x": 16, "y": 7, "w": 8, "h": 8},
+      "title": "Observed tokens by model",
+      "description": "Reported chat-span tokens by model for the selected projects. MissingUsage counts chat spans missing input or output; MissingCache counts spans without cache-read reporting. Null totals mean no reported value.",
+      "type": "table",
+      "gridPos": {"x": 0, "y": 22, "w": 24, "h": 7},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "fixed", "fixedColor": "#56D4C0"},
-          "unit": "short", "min": 0, "decimals": 0, "noValue": "No spans"
+          "unit": "short", "decimals": 0, "noValue": "Not reported"
         },
         "overrides": []
       },
-      "options": {
-        "displayMode": "basic", "orientation": "horizontal",
-        "showUnfilled": true, "valueMode": "color",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "/^Spans$/", "values": true}
-      },
+      "options": {"showHeader": true, "cellHeight": "sm"},
       "targets": [
         {
           "refId": "A",
@@ -228,32 +222,24 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| extend Operation=tostring(Attributes['gen_ai.operation.name'])\n| extend Operation=iff(isempty(Operation), '(not labelled)', Operation)\n| summarize Spans=count() by Operation\n| order by Spans desc"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend Model=tostring(Attributes['gen_ai.response.model'])\n| extend Model=iff(isempty(Model), '(not reported)', Model)\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize ChatSpans=count(), InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null)), OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null)), CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null)), MissingUsage=countif(isnull(InputTokens) or isnull(OutputTokens)), MissingCache=countif(isnull(CacheReadTokens)) by Model\n| order by InputTokens desc"
           }
         }
       ]
     },
     {
       "id": 2,
-      "title": "Assessment summaries",
+      "title": "Observed tokens by project",
       "type": "table",
-      "description": "Latest published reviewed revision per session, not live archive eligibility. Empty results mean no reviewed summaries match the selected filters; local assessments are not automatically published.",
-      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 9},
+      "description": "Chat-span observations only, not billing. MissingUsage counts spans without input or output; MissingCache counts spans without cache-read reporting. Unattributed usage is retained separately. Null totals mean no reported value.",
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 7},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "options": {"showHeader": true, "cellHeight": "md"},
       "fieldConfig": {
-        "defaults": {"custom": {"cellOptions": {"type": "auto"}, "wrapText": true}},
+        "defaults": {"unit": "short", "decimals": 0, "noValue": "Not reported"},
         "overrides": [
-          {"matcher": {"id": "byName", "options": "TimeGenerated"}, "properties": [
-            {"id": "displayName", "value": "Assessed at"},
-            {"id": "unit", "value": "dateTimeAsLocal"},
-            {"id": "custom.width", "value": 180}
-          ]},
-          {"matcher": {"id": "byName", "options": "Summary"}, "properties": [
-            {"id": "custom.width", "value": 480}
-          ]},
-          {"matcher": {"id": "byName", "options": "Outcome"}, "properties": [
-            {"id": "custom.width", "value": 200}
+          {"matcher": {"id": "byName", "options": "ProjectId"}, "properties": [
+            {"id": "custom.width", "value": 300}
           ]}
         ]
       },
@@ -266,23 +252,57 @@
             "resources": ["__WORKSPACE_RESOURCE_ID__"],
             "dashboardTime": false,
             "resultFormat": "table",
-            "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize ChatSpans=count(), InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null)), OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null)), CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null)), MissingUsage=countif(isnull(InputTokens) or isnull(OutputTokens)), MissingCache=countif(isnull(CacheReadTokens)) by ProjectId\n| order by InputTokens desc"
           }
         }
       ]
     },
     {
       "id": 12,
-      "title": "Inspect data | freshness and individual spans",
+      "title": "Inspect data | assessments and raw telemetry",
       "type": "row",
       "collapsed": true,
-      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 1},
+      "gridPos": {"x": 0, "y": 29, "w": 24, "h": 1},
       "panels": [
+        {
+          "id": 15,
+          "title": "Reviewed assessment summaries",
+          "description": "Latest published reviewed revision per session. No data means no reviewed summaries match these filters; telemetry does not trigger assessment or automatic publishing.",
+          "type": "table",
+          "gridPos": {"x": 0, "y": 30, "w": 24, "h": 9},
+          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "options": {"showHeader": true, "cellHeight": "md"},
+          "fieldConfig": {
+            "defaults": {"custom": {"cellOptions": {"type": "auto"}, "wrapText": true}},
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "TimeGenerated"}, "properties": [
+                {"id": "displayName", "value": "Assessed at"},
+                {"id": "unit", "value": "dateTimeAsLocal"}
+              ]},
+              {"matcher": {"id": "byName", "options": "Summary"}, "properties": [
+                {"id": "custom.width", "value": 480}
+              ]}
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "queryType": "Azure Log Analytics",
+              "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+              "azureLogAnalytics": {
+                "resources": ["__WORKSPACE_RESOURCE_ID__"],
+                "dashboardTime": false,
+                "resultFormat": "table",
+                "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
+              }
+            }
+          ]
+        },
         {
           "id": 3,
           "title": "Assessment freshness by project",
           "type": "table",
-          "gridPos": {"x": 0, "y": 25, "w": 24, "h": 7},
+          "gridPos": {"x": 0, "y": 39, "w": 24, "h": 7},
           "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
           "options": {"showHeader": true},
           "targets": [
@@ -303,7 +323,7 @@
           "id": 5,
           "title": "Incoming telemetry - raw spans, not usage totals",
           "type": "table",
-          "gridPos": {"x": 0, "y": 32, "w": 24, "h": 7},
+          "gridPos": {"x": 0, "y": 46, "w": 24, "h": 7},
           "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
           "options": {"showHeader": true},
           "targets": [
@@ -327,23 +347,23 @@
       "title": "Pilot notes | privacy, accounting and analysis scope",
       "type": "row",
       "collapsed": true,
-      "gridPos": {"x": 0, "y": 25, "w": 24, "h": 1},
+      "gridPos": {"x": 0, "y": 30, "w": 24, "h": 1},
       "panels": [
         {
           "id": 4,
-          "title": "Usage and reliability - not collecting verified totals",
+          "title": "Token accounting and reliability limits",
           "type": "text",
-          "gridPos": {"x": 0, "y": 26, "w": 12, "h": 8},
+          "gridPos": {"x": 0, "y": 31, "w": 12, "h": 8},
           "options": {
             "mode": "markdown",
-            "content": "### Reading the numbers\nThe background collector runs continuously. The optional attribution gateway runs separately and must also be running when selected as the client endpoint. This setup description is not a live health signal.\n\nThe cards and charts count **observed spans**, not validated usage totals. Invocation and model-call spans may overlap, so their token counts must not be summed. Model labels are observations, not verified model calls.\n\nThe opt-in gateway resolves exact approved local session identities before queueing. Direct, unsupported, or unresolved spans remain `unattributed`; inspect AttributionReason for gateway diagnostics. Selecting a named project cannot recover missing labels or change historical rows. Live two-project acceptance remains pending. Last span time indicates data freshness, **not current process health**.\n\nThe time picker filters assessment creation time and span start time. Assessment lookback is capped at 90 days; telemetry at 30 days. No data does not prove that the collector is healthy or stopped."
+            "content": "### Reading the numbers\nToken panels sum only deduplicated **chat spans**. Agent and tool totals are excluded to avoid overlap. Cache-read tokens are separate observations, not an extra amount to add to input. Missing fields are not converted into zero totals; MissingUsage and MissingCache expose incomplete reporting. Transport loss, unsupported clients, subagent overlap, and billing reconciliation remain unverified.\n\nExact approved local session identities determine project aliases. Direct or unresolved spans remain `unattributed`; project selection cannot repair historical rows. Live two-project acceptance remains pending.\n\nLast observed span is data freshness, not process health. The gateway health endpoint checks local reachability, not Azure. Time filters use span start or assessment creation time; lookbacks are capped at 30 and 90 days respectively. Synthetic smoke rows are excluded."
           }
         },
         {
           "id": 14,
           "title": "Capture boundaries and daily reflection",
           "type": "text",
-          "gridPos": {"x": 12, "y": 26, "w": 12, "h": 8},
+          "gridPos": {"x": 12, "y": 31, "w": 12, "h": 8},
           "options": {
             "mode": "markdown",
             "content": "### Metadata only\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics.\n\nNo prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\n### Daily reflection is separate\n**Copilot Daily Session Review** processes new archived sessions at **09:00 local time** within an explicitly approved local scope. An approved projects root includes future projects, with no backfill and one shared five-attempt daily budget. The first scheduled assessment is deferred until the next 09:00 run after installation.\n\nAssessments stay local until a derived summary is manually reviewed and published. Published rows describe historical archived revisions, not live source eligibility. Telemetry arriving here does not mean conversations have been analyzed. Check local status for actual enablement and job health."

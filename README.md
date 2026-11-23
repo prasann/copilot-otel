@@ -6,24 +6,26 @@ Python tools, and `azd`/Bicep infrastructure. No Docker or dedicated Grafana ser
 
 ## Current status
 
-**Working pilot; live acceptance is incomplete.** Implementation and offline
-regression tests are in place. Recorded Azure checks used synthetic data; they
-do not establish real-client delivery, real-session assessment quality, or
-current service health.
+**Working pilot; broader live acceptance is incomplete.** Real-session project
+attribution has been queried back from Azure and confirmed visible in the
+dashboard for `personal/copilot-otel`. Offline regression tests remain in place;
+synthetic uploads are manual troubleshooting diagnostics, not routine activity
+or evidence of real-session assessment quality or current service health.
 
 | Area | Implemented / recorded evidence | Still pending |
 | --- | --- | --- |
 | Session reflection | Read-only native capture, bounded worker, retention, daily scheduling, reviewed-summary publisher | First eligible real capture, assessment, and published-summary query-back |
-| Metadata telemetry | Native collector and opt-in gateway started in recorded setup; metadata attribution approved for `personal/copilot-otel`; offline binary tests pass | Editor reload and controlled live two-project attribution/query-back; usage accounting |
-| Azure dashboard | Attribution diagnostics deployed, definition read back, and updated query executed successfully | Verify latest rendering and portal controls |
+| Metadata telemetry | Real-session chat/tool spans attributed to `personal/copilot-otel` and queried back from Azure; offline binary tests pass | Controlled second-project attribution/query-back; usage accounting |
+| Azure dashboard | Project attribution user-confirmed visible; usage-first token layout deployed with query/read-back verification | Verify new layout rendering and project/time filter interaction |
 | Assessment quality | Rubric, schemas, separate evaluation fixtures, one bounded Azure synthetic model call | Repeated scored evaluation, longer inputs, local/Azure comparison |
 
 The last recorded pilot setup on **23 November 2026** enabled reflection for new
 archived sessions under the approved projects root, including future projects,
 and installed **Copilot Daily Session Review**. Its first run was scheduled for
 **24 November at 09:00 local**; no real-session model request had been made.
-Insiders metadata export was also configured globally, but real-span arrival
-was not verified. These are recorded setup results, not a live health report.
+Insiders metadata export was also configured globally; real-span arrival and
+single-project attribution were verified later that day. These are recorded
+results, not a live health report.
 New installations keep inference and scheduling disabled until explicitly enabled.
 
 Azure deployment, including the last recorded dashboard refresh, was confirmed complete
@@ -31,8 +33,9 @@ on **23 November 2026**. Live acceptance checks below remain separate.
 
 Later on **23 November**, the attribution gateway was started in the background
 for `personal/copilot-otel` only, and the Insiders endpoint was saved as
-`http://127.0.0.1:4319`. Content and identity capture remain off. Reload the editor
-and use a controlled new session before claiming live attributed delivery.
+`http://127.0.0.1:4319`. Content and identity capture remain off. After a full
+Insiders restart, real-session attributed delivery and dashboard visibility
+were confirmed for this project.
 The gateway does not restart automatically after logout/reboot.
 
 The dashboard attribution diagnostics were updated separately and read-back/query
@@ -52,8 +55,12 @@ definition changed, preserving its portal identity and title.
   endpoint, without enabling content or identity capture.
 - [x] Deploy dashboard attribution diagnostics and verify definition read-back
   and query execution.
+- [x] Query back real-session attribution for `personal/copilot-otel` and confirm
+  it is visible in the deployed dashboard.
+- [x] Deploy observed chat-token cards, trend, and project/model breakdowns;
+  verify live queries and read-only arithmetic/filter fixtures.
 
-These are implementation and recorded setup milestones, not live acceptance.
+These are recorded milestones, not acceptance of every supported scenario.
 
 ### Pending acceptance
 
@@ -62,12 +69,11 @@ These are implementation and recorded setup milestones, not live acceptance.
 - [ ] Verify capture identity and eligibility after a full editor/host restart,
   including cancellation, resume, and publication timing.
 - [ ] Observe a real 09:00 run, sleep/wake or login catch-up, and worker recovery.
-- [ ] Reload Insiders and query back real spans with exact session identities,
-  approved project aliases, and no workspace paths; repeat with a second
-  explicitly approved project.
-- [ ] Check the deployed dashboard's rendering and project/time filters.
-- [ ] Prove project identity and reconcile concurrent projects, subagent overlap,
-  and replay against known totals before adding usage or delivery/error panels.
+- [ ] Repeat real-span attribution/query-back with a second explicitly approved
+  project, verifying exact identities, aliases, and absence of workspace paths.
+- [ ] Check the new token layout's rendering and project/time filter interaction.
+- [ ] Reconcile concurrent projects, subagent overlap, replay, and delivery loss
+  against known totals before claiming complete usage, billing, or delivery/error rates.
 - [ ] Test queue crash/replay, offline recovery, permanent rejection, expired
   Azure CLI authentication, and saturation.
 - [ ] Test a separate least-privilege reader and an unauthorized identity.
@@ -133,6 +139,9 @@ python3 -m venv .venv
 
 Tests use authored fixtures and isolated native stores. They do not read real
 history, call models, upload data, or install services.
+Keep these synthetic fixtures as regression coverage. Normal operation uses
+real sessions; do not generate routine synthetic uploads. Optional live checks
+belong in [troubleshooting](docs/troubleshooting.md#manual-synthetic-diagnostics).
 
 Infrastructure tests compile Bicep if Azure CLI is present; its Bicep compiler
 must also be installed. Native-binary privacy and attribution tests run only if the pinned
@@ -283,7 +292,8 @@ you enabled above to `http://127.0.0.1:4319`: use
 `chat.agentHost.otel.otlpEndpoint` for Agent Host, or
 `github.copilot.chat.otel.otlpEndpoint` for the extension. Fully quit and reopen
 Insiders for Agent Host changes; reload the window for extension-only changes.
-Health checks prove local reachability, not Azure delivery or complete
+The health response reports `status: "ok"`, `collector: "reachable"`, and
+`cloud_delivery: "not_checked"`. It checks local reachability, not Azure delivery or complete
 identity coverage. Policy is loaded at gateway startup; policy changes require
 restarting the gateway and reinstalling the collector with the updated policy.
 The dedicated receiver trusts local processes; loopback is not an authentication
@@ -308,7 +318,8 @@ Before claiming live support, send controlled sessions from two approved
 projects, query back their exact identities/aliases and absence of paths, then
 verify project filters in the deployed dashboard. Offline binary tests do not
 establish real-client/Azure acceptance. The pilot's dashboard attribution
-status/reason columns are already deployed and read-back/query verified; rendering
+status/reason columns are deployed, read-back/query verified, and user-confirmed
+visible with real attribution for `personal/copilot-otel`. Two-project acceptance
 remains pending. New environments still require a separately reviewed
 infrastructure deployment; installing the gateway does not deploy dashboard changes.
 
@@ -317,40 +328,16 @@ restart Insiders for Agent Host changes (or reload for extension-only changes),
 stop the gateway with Ctrl-C, then stop/reinstall the collector without
 `--attribution-policy`. Historical Azure records are unchanged.
 
-## Azure synthetic smoke
-
-<details>
-<summary>Optional diagnostic only; not the real-session workflow</summary>
-
-Configure local `.env` using [.env.example](.env.example) and
-[Azure setup](docs/azure-setup.md). Explicitly opt in with
-`ASSESSMENT_ALLOW_SYNTHETIC_INFERENCE=true`, then:
-
-```bash
-.venv/bin/python -m tools.azure_pilot assess --execute
-# Inspect the assessment; author a short derived summary, not a quotation.
-.venv/bin/python -m tools.azure_pilot publish <assessment-file> \
-  --summary "<reviewed synthetic summary>" --execute
-.venv/bin/python -m tools.azure_pilot query <receipt-file>
-```
-
-One invocation sends one tool-free model request, with no automatic retries,
-`store=false`, and at most 2,000 output tokens. Failed calls count against the
-checkout-local 16-attempt ceiling. This is not a monetary cap. Generated responses,
-receipts, and the budget ledger stay in ignored `.pilot/`; **do not reset the
-ledger to bypass the limit**. Retry query-back rather than republishing.
-
-</details>
-
 ## Reading the dashboard
 
 ```text
-Assessed sessions | Observed spans | Model labels | Last observed span
-------------------+----------------+--------------+-------------------
-Activity over time                 | Observed operations
+Input tokens | Output tokens | Cache-read tokens | Last observed span
+-------------+---------------+-------------------+-------------------
+Observed tokens over time
 ----------------------------------------------------------------------
-Assessment summaries
-  > Inspect data: freshness and individual spans
+Observed tokens by project
+Observed tokens by model
+  > Inspect data: reviewed assessments, freshness and individual spans
       ProjectId | Attribution | AttributionReason | span metadata
   > Pilot notes: privacy, accounting, and analysis scope
 ```
@@ -360,8 +347,13 @@ Open **Azure Monitor > Dashboards with Grafana** in the portal. The
 manually. Queries use the signed-in reader's permissions. Project accepts `*`
 or an exact project ID; refresh is five minutes.
 
-- Spans are observations, **not billable calls or token totals**. Invocation and
-  model-call spans may overlap, so their tokens are not summed.
+- Token cards, trend, and project/model tables sum reported usage from
+  deduplicated `chat` spans only. Agent and tool spans are excluded to avoid
+  overlapping totals. These are **observed tokens, not billing or guaranteed
+  complete usage**; transport loss and subagent overlap remain unverified.
+- Cache-read tokens are shown separately, never added to input tokens. Missing
+  reporting is not treated as zero: totals with no reported values stay empty,
+  while `MissingUsage` and `MissingCache` expose incomplete chat-span reporting.
 - Direct native spans remain `unattributed`; the opt-in gateway can label exact,
   approved session identities. Accounting remains unverified. Project filters
   cannot reconstruct missing identity or relabel historical rows.
@@ -372,6 +364,10 @@ or an exact project ID; refresh is five minutes.
   Lookbacks are capped at 30 days for spans and 90 days for assessments.
 - Synthetic smoke records are excluded. Real assessments appear only after
   explicit reviewed-summary publishing; no data is not a health signal.
+- Assessment summaries and freshness are collapsed under **Inspect data**.
+  An empty assessment panel is expected until a real reviewed summary is published.
+- Leave existing synthetic records to expire under Azure retention (30 days for
+  spans, 90 days for assessments); routine cleanup does not require purging them.
 - Published assessments describe historical archived revisions, not live archive
   state. Later resumes are tracked locally, not synchronized back to Azure.
 

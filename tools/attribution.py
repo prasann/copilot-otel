@@ -275,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, urllib.error.URLError):
             self.reply(503, b'{"error":"collector_unavailable"}')
             return
-        self.reply(200, b'{"status":"gateway_and_collector_reachable_not_cloud_verified"}')
+        self.reply(200, b'{"status":"ok","collector":"reachable","cloud_delivery":"not_checked"}')
 
     def do_POST(self) -> None:
         if self.path not in ("/v1/traces", "/v1/metrics", "/v1/logs"):

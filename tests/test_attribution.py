@@ -271,6 +271,9 @@ class AttributionTests(unittest.TestCase):
         base, received, _ = self.gateway()
         with self.opener.open(base + "/health", timeout=5) as response:
             self.assertEqual(response.status, 200)
+            self.assertEqual(json.load(response), {
+                "status": "ok", "collector": "reachable", "cloud_delivery": "not_checked",
+            })
         request = urllib.request.Request(
             base + "/v1/traces", data=json.dumps(self.payload(self.attributes(self.alpha[1]))).encode(),
             headers={"Content-Type": "application/json"},
@@ -355,6 +358,11 @@ class AttributionTests(unittest.TestCase):
         base, received, backend = self.gateway()
         backend.shutdown()
         backend.server_close()
+        with self.assertRaises(urllib.error.HTTPError) as health_error:
+            self.opener.open(base + "/health", timeout=5)
+        self.assertEqual(health_error.exception.code, 503)
+        self.assertEqual(json.load(health_error.exception), {"error": "collector_unavailable"})
+        health_error.exception.close()
         request = urllib.request.Request(
             base + "/v1/traces", data=json.dumps(self.payload([])).encode(),
             headers={"Content-Type": "application/json"},
