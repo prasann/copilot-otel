@@ -4,7 +4,8 @@
 2. Define a versioned output schema and a tool-free rubric with event citations.
 3. Implement an offline validator for output shape and reference integrity; keep
    semantic scoring explicit rather than pretending valid JSON means correctness.
-4. Approve one local candidate, one Azure candidate, endpoint access, and cost cap.
+4. For the full comparison, approve one local candidate, one Azure candidate,
+   endpoint access, and cost limits. One Azure smoke has run; the comparison is deferred.
 5. Run both against the same held-out cases twice; preserve scored, synthetic-only
    results and compare with a deterministic-facts baseline.
 6. Review usefulness before building the capture/batch platform.

@@ -37,7 +37,7 @@
       "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
       "options": {
         "mode": "markdown",
-        "content": "### Reflection + activity\nReviewed assessments and metadata-only telemetry for the selected project and time range.\n\n**Accounting and project attribution are unverified.** Spans are observations, not billable calls or token totals. Missing labels stay `unattributed`. Daily analysis is **not installed**. Setup notes below are not live health signals."
+        "content": "### Reflection + activity\nReviewed assessments and metadata-only telemetry for the selected project and time range.\n\n**Accounting and telemetry project attribution are unverified.** Spans are observations, not billable calls or token totals. Missing labels stay `unattributed`. Daily assessment uses the separately enabled **Copilot Daily Session Review** job; results require reviewed publishing. Setup notes below are not live health signals."
       }
     },
     {
@@ -237,7 +237,7 @@
       "id": 2,
       "title": "Assessment summaries",
       "type": "table",
-      "description": "Latest reviewed revision per session. Empty results mean no eligible assessments match the selected project and time range; daily analysis is not installed.",
+      "description": "Latest published reviewed revision per session, not live archive eligibility. Empty results mean no reviewed summaries match the selected filters; local assessments are not automatically published.",
       "gridPos": {"x": 0, "y": 15, "w": 24, "h": 9},
       "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
       "options": {"showHeader": true, "cellHeight": "md"},
@@ -346,7 +346,7 @@
           "gridPos": {"x": 12, "y": 26, "w": 12, "h": 8},
           "options": {
             "mode": "markdown",
-            "content": "### Metadata only\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics.\n\nNo prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\n### Daily reflection is separate\nArchived-conversation analysis is approved only for `personal/copilot-otel`, once daily at **09:00 local time**, for new sessions with no backfill. The capture/analysis worker is **not installed yet**.\n\nAn approval is not an active schedule. Telemetry arriving here does not mean archived conversations have been analyzed."
+            "content": "### Metadata only\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics.\n\nNo prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\n### Daily reflection is separate\n**Copilot Daily Session Review** processes new archived sessions at **09:00 local time** within an explicitly approved local scope. An approved projects root includes future projects, with no backfill and one shared five-attempt daily budget. The first scheduled assessment is deferred until the next 09:00 run after installation.\n\nAssessments stay local until a derived summary is manually reviewed and published. Published rows describe historical archived revisions, not live source eligibility. Telemetry arriving here does not mean conversations have been analyzed. Check local status for actual enablement and job health."
           }
         }
       ]

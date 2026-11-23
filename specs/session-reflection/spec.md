@@ -1,6 +1,6 @@
-# Session reflection: first development slice
+# Synthetic session assessment contract
 
-Canonical requirements: [PLAN.md](../../PLAN.md).
+Remaining worker requirements: [PLAN.md](../../PLAN.md).
 Feasibility gates: [SPIKES.md](../../SPIKES.md).
 
 ## Objective
@@ -22,13 +22,14 @@ no transcript, code, tool payload, or evidence excerpt is published there.
 - Keep reference answers out of the model input.
 
 The authored cases in [cases.json](cases.json) are development fixtures, not a
-held-out benchmark. Create a separate held-out set before claiming evaluation
-thresholds from the spike have passed.
+held-out benchmark. The separate [evaluation set](evaluation-cases.json) and
+scoring procedure below define the deferred quality evaluation.
 
 ## Out of scope
 
-Real histories, live inference before approval, model installation/provisioning,
-native-history adapters, scheduled workers, dashboards, and Azure deployment.
+This contract covers synthetic assessment preparation/validation, not real-history
+capture, worker installation, model provisioning, or dashboard deployment.
+The separate explicit Azure synthetic runner is described below.
 
 ## Offline development commands
 
@@ -124,8 +125,9 @@ format. No automatic aggregate decision is implemented.
 
 The user subsequently chose a basic working pilot before full evaluation. One
 synthetic Azure model smoke succeeded; that is not a pass of the scoring procedure
-above. The full comparison, longer-input testing, and real-content permission remain
-outstanding. See the [current checklist](tasks.md).
+above. The full comparison and longer-input testing remain outstanding. Recorded
+real-content approval is limited to the bounded pilot in the
+[current checklist](tasks.md); these tools still accept only authored fixtures.
 
 ## Azure synthetic runner configuration
 
@@ -150,43 +152,21 @@ The user intends to configure deployment-side limits; verify
 their actual semantics rather than assuming rate/token limits cap total spend.
 One Azure candidate does not complete the originally proposed local/Azure comparison.
 
-## Local unified synthetic demo
+## Real-session integration
 
-For Azure prerequisites and the intended `azd` deployment workflow, see the
-[Azure pilot setup checklist](../../docs/azure-setup.md). The deployment template
-now provisions the Entra-authenticated monitoring baseline and repo-backed portal
-Grafana panels, not a dedicated Managed Grafana instance. Cloud deployment and
-definition read-back succeeded; browser rendering remains unverified.
+The standalone synthetic demo and folder mapper have been removed. The shared
+assessment contract is now used by both fixture validation and the
+[real-session worker](../../docs/session-reflection.md). The worker supplies only
+partial user/assistant text and minimal tool success flags, not tool output.
+It appends explicit evidence/coverage cautions to the rubric and records request
+and effective-instruction hashes with local results. The rubric's opening scope
+is now neutral rather than synthetic-only; no model-quality pass is implied.
 
-From the repository root:
-
-```bash
-.venv/bin/python -m tools.local_demo
-.venv/bin/python -m unittest discover -s tests
-```
-
-The demo prints one combined JSON preview with an authored assessment and synthetic
-usage grouped under the same project IDs. No services are started, model calls
-made, native history read, or Azure resources accessed. This is a local data-flow
-demonstration, not a running Grafana dashboard or real OTel receiver.
-
-Folder attribution uses `<projects-root>/<personal|msft>/<project>/...`.
-`project.name` is the project folder; `project.id` includes category to distinguish
-duplicate names. Nested folders inherit the top-level project. Paths are resolved
-locally (including symlinks) and not included in the output. Unsupported/outside
-paths remain explicitly unattributed; relative paths are rejected.
-
-The default root is the current user's home directory plus `projects`; override
-with `--projects-root /absolute/path` for another machine. The synthetic examples
-are constructed in memory, not discovered on disk. A pure folder mapper cannot
-prove that a telemetry record actually originated in that workspace.
-
-Expected totals: four received usage records including one replay, three unique
-records, 325 input tokens and 55 output tokens. Of these, 25 input and 5 output
-tokens are unattributed. The two projects both named `sample` stay separate.
-Conflicting replays fail instead of silently choosing a value.
-
-The assessment is deliberately hand-authored and structurally validated, not
-model-assessed. Raw fixture prompts/tool output are not included in the preview.
-Evidence IDs are local references only. Real-client attribution, native worktree
-mapping, multi-root policy, provider evaluation, and Azure/Grafana remain unproven.
+New installations disable real inference until scope/preview review and explicit activation. Its
+separate bounds are 5 attempts/local day, 20,000 serialized request characters,
+and 2,000 output tokens; it does not reuse or reset the synthetic attempt ledger.
+The pilot has now been enabled for new archived sessions across the approved
+projects tree, including future projects, with one shared daily budget and no
+historical backfill. Its first scheduled assessment is deferred to the next 09:00 run.
+First real-session inference/query-back and actual wake scheduling remain
+acceptance checks, not properties established by passing fixture tests.

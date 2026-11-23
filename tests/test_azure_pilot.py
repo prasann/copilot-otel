@@ -1,5 +1,6 @@
 import copy
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,15 @@ from tests import test_assessment_spike
 
 
 class AzurePilotTests(unittest.TestCase):
+    def test_request_body_is_not_exposed_in_process_arguments(self) -> None:
+        body = {"input": "PRIVATE CONVERSATION MARKER"}
+        response = subprocess.CompletedProcess(args=[], returncode=0, stdout='{"ok": true}')
+        with patch.object(pilot.subprocess, "run", return_value=response) as send:
+            self.assertEqual(pilot.rest("https://example.test", "audience", body), {"ok": True})
+        send.assert_called_once()
+        self.assertNotIn(body["input"], " ".join(send.call_args.args[0]))
+        self.assertEqual(json.loads(send.call_args.kwargs["input"]), body)
+
     def setUp(self) -> None:
         self.config = {
             "ASSESSMENT_AZURE_AUTH": "azure_cli",
@@ -100,6 +110,19 @@ class AzurePilotTests(unittest.TestCase):
                 response["tables"][0]["rows"][0][4] = "Different stored summary"
                 with self.assertRaisesRegex(ValueError, "field differs"):
                     pilot.query(path)
+
+    def test_query_preserves_unknown_source_end_time_as_null(self) -> None:
+        record = {"AssessmentId": "386c89a7-ce2b-429d-a6c8-f3b6a4d12997",
+                  "TimeGenerated": "2026-11-23T07:00:00+00:00",
+                  "SessionEndedAt": None, "ProjectId": "personal/test", "Summary": "Reviewed"}
+        response = {"tables": [{"columns": [{"name": key} for key in record],
+                                "rows": [list(record.values())]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "receipt.json"
+            path.write_text(json.dumps({"record": record}))
+            with patch.object(pilot, "azd_value", return_value="0" * 32), \
+                    patch.object(pilot, "rest", return_value=response):
+                self.assertEqual(pilot.query(path)["status"], "query_verified")
 
 
 if __name__ == "__main__":

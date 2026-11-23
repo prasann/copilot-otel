@@ -1,4 +1,4 @@
-"""Explicit, synthetic-only Azure smoke tests using the signed-in Azure CLI user."""
+"""Azure smoke diagnostics and shared request/publishing helpers using CLI identity."""
 
 import argparse
 import fcntl
@@ -14,15 +14,18 @@ from urllib.parse import urlsplit
 
 from jsonschema.exceptions import ValidationError
 
-from tools.assessment_spike import ROOT, load_case, prepare, validate_assessment
+from tools.assessment import ROOT, prepare, validate_assessment
+from tools.assessment_spike import load_case
 
 
 STATE = ROOT / ".pilot"
 PROVIDER = "azure"
 
 
-def command_json(arguments: list[str]) -> Any:
-    result = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
+def command_json(arguments: list[str], *, input_text: str | None = None) -> Any:
+    result = subprocess.run(
+        arguments, input=input_text, capture_output=True, text=True, timeout=180,
+    )
     if result.returncode:
         raise RuntimeError(f"{arguments[0]} failed: {result.stderr.strip()[:2000]}")
     return json.loads(result.stdout) if result.stdout.strip() else None
@@ -31,9 +34,9 @@ def command_json(arguments: list[str]) -> Any:
 def rest(url: str, resource: str, body: Any) -> Any:
     return command_json([
         "az", "rest", "--method", "post", "--url", url,
-        "--resource", resource, "--body", json.dumps(body),
+        "--resource", resource, "--body", "@/dev/stdin",
         "--only-show-errors", "--output", "json",
-    ])
+    ], input_text=json.dumps(body))
 
 
 def load_config(path: Path) -> dict[str, str]:
@@ -179,6 +182,11 @@ def azd_value(name: str) -> str:
 def publish(path: Path, summary: str) -> Path:
     run = json.loads(path.read_text(encoding="utf-8"))
     record = assessment_record(run, summary)
+    receipt = path.parent / f"publish-{record['AssessmentId']}.json"
+    return publish_record(record, receipt)
+
+
+def publish_record(record: dict[str, Any], receipt: Path) -> Path:
     endpoint = azd_value("ASSESSMENT_LOGS_INGESTION_ENDPOINT").rstrip("/")
     host = urlsplit(endpoint)
     if (host.scheme != "https" or not host.hostname
@@ -192,7 +200,6 @@ def publish(path: Path, summary: str) -> Path:
     stream = azd_value("ASSESSMENT_STREAM_NAME")
     if stream != "Custom-CopilotAssessmentInput":
         raise ValueError("Unexpected assessment stream")
-    receipt = path.parent / f"publish-{record['AssessmentId']}.json"
     envelope = {"status": "attempting", "record": record}
     receipt.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
     rest(f"{endpoint}/dataCollectionRules/{rule}/streams/{stream}?api-version=2023-01-01",
@@ -223,7 +230,7 @@ def query(receipt: Path) -> dict[str, Any]:
         raise ValueError("Duplicate stored assessment ID; investigate before continuing")
     row = dict(zip((column["name"] for column in table["columns"]), table["rows"][0]))
     for key, value in record.items():
-        if key in ("TimeGenerated", "SessionEndedAt"):
+        if key in ("TimeGenerated", "SessionEndedAt") and value is not None:
             if datetime.fromisoformat(row[key].replace("Z", "+00:00")) != datetime.fromisoformat(value):
                 raise ValueError(f"Stored timestamp differs: {key}")
         elif row.get(key) != value:

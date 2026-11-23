@@ -1,17 +1,22 @@
-# Azure pilot setup: your checklist
+# Azure pilot setup
 
 ## What you can do now
 
 Prepare Azure access and the existing model deployment, then preview and
-provision the monitoring baseline using section 5. The repo's local demo
-does not itself connect to Azure. A separate explicit synthetic runner/publisher
-now connects to Azure. A native macOS collector supports synthetic traces;
-real-client configuration and scheduled processing remain unimplemented.
+provision the monitoring baseline using section 5. Offline tests do not connect
+to Azure. A separate explicit synthetic runner/publisher
+connects to Azure. A native macOS collector supports metadata-only traces.
+VS Code Insiders settings were configured globally; reload and real-client
+verification remain pending. The [real-session worker](session-reflection.md) is
+implemented and explicitly enabled for the pilot's approved projects root. Its
+first scheduled assessment is deferred until the next 09:00 local run; live
+real-session inference has not been tested.
 
 The pilot's first model request and reviewed summary upload/query-back succeeded.
 Dashboard definitions and project/time-filtered KQL were verified through CLI.
-Visual rendering is deferred to the user; no browser login is required to continue
-development. Progress is tracked in the [pilot checklist](../specs/session-reflection/tasks.md).
+Earlier dashboard rendering and datasource access were user-confirmed. The latest
+visual refresh still needs provisioning and a portal check. Progress is tracked
+in the [pilot checklist](../specs/session-reflection/tasks.md).
 
 [azure.yaml](../azure.yaml) uses [infra/main.bicep](../infra/main.bicep) and
 [infra/core.bicep](../infra/core.bicep). They now provision Log Analytics,
@@ -131,8 +136,8 @@ supported sources. The dashboard experience has no additional dashboard charge;
 ingestion, retention, and other Azure services can still incur costs.
 
 Summary KQL, project/time filters, and current-identity query access were tested
-with synthetic data; visual rendering remains a user check. Do not create a dedicated
-Managed Grafana instance to work around an untested limitation.
+with synthetic data. Check rendering and browser filter interaction after changes.
+Do not create a dedicated Managed Grafana instance to work around an untested limitation.
 
 "Private" here initially means authenticated and RBAC-restricted, not necessarily
 private network endpoints. If network isolation is also required, decide that
@@ -195,8 +200,7 @@ azd env get-value TELEMETRY_DCR_RESOURCE_ID
 
 `LOG_ANALYTICS_WORKSPACE_ID` is the ARM resource ID; the separate
 `LOG_ANALYTICS_WORKSPACE_CUSTOMER_ID` is the workspace query GUID.
-No connection string is output. The old collector configuration is **not**
-compatible with the Entra-only baseline; do not enable it. Use the
+No connection string is output. Use the
 [native macOS installer](../README.md#native-macos-collector) instead.
 Its standard OTLP HTTP exporter uses Azure CLI authentication and a bounded
 disk queue after metadata filtering. It avoids the legacy Azure Monitor
@@ -218,18 +222,16 @@ events automatically and is not approved for real histories.
 
 Open the Application Insights resource > **Dashboards with Grafana** after
 provisioning. The deployed dashboard is tagged for that gallery and includes
-assessment-summary/freshness panels and an incoming native-span table with an
-explicit unverified-accounting status. The earlier synthetic assessment and two
-trace spans were deleted through Azure's Delete Data API and query-verified absent,
-not merely hidden. One service-name-only resource lookup row remains: Azure
-rejected its ID filter and an exact timestamp filter matched zero underlying
-records. It contains no prompts, token counts, or conversation data.
-This API removes records from query results but does not physically
-erase their storage before retention expiry.
+assessment summaries, span activity, model labels, operation counts, and collapsed
+freshness/raw-span details with explicit unverified-accounting notes. Synthetic
+smoke records are excluded from dashboard queries. Earlier synthetic assessment
+and span samples were deleted and query-verified absent; see the
+[pilot checklist](../specs/session-reflection/tasks.md) for the residual
+service-name-only resource-row caveat.
 [The JSON definition](../dashboards/copilot-pilot.json) is deployed through
 the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resource
-(`2025-09-01-preview`), not unsupported properties on the parent. Browser rendering
-and datasource selection still require a portal check. See the
+(`2025-09-01-preview`), not unsupported properties on the parent. Check browser
+rendering and datasource selection after provisioning changes. See the
 [official export/ARM guidance](https://learn.microsoft.com/azure/azure-monitor/visualize/visualize-use-grafana-dashboards#manage-a-dashboard-as-an-arm-template).
 The project field accepts `*` or an exact project ID. The time picker filters
 assessment creation time; superseded revisions and replay rows are deduplicated.
@@ -246,8 +248,10 @@ review and clean up those resources separately. Only run `azd down` after
 confirming the selected environment contains exclusively disposable pilot
 resources. Never use it on an environment containing an existing/shared model.
 
-Still pending: real-client metadata verification, real-history publisher validation, live usage
-panels, and local retention/scheduling. Cloud assessment retention is configured
+Still pending: real-client metadata verification, live real-history inference and
+summary query-back, verified usage totals, and actual scheduling/wake acceptance.
+The local retention/schedule implementation is covered by isolated tests and the
+job is installed; actual wake behavior remains untested. Cloud assessment retention is configured
 here; no native client history is deleted. Use the
 [pilot checklist](../specs/session-reflection/tasks.md) for current progress and
 the [README smoke commands](../README.md#azure-synthetic-smoke) to repeat the bounded
@@ -261,18 +265,14 @@ synthetic connection test.
 3. Send a small synthetic metadata/assessment batch to Azure; query stored
    fields and verify prohibited content is absent.
 4. Show both streams in one dashboard with the same project/time filters.
-   Keep unattributed usage visible and reconcile replay/dedup totals.
+   The production dashboard excludes synthetic smoke rows; use explicit query-back
+   for those tests. Keep unattributed spans visible; do not sum unverified tokens.
 5. Verify an authorized reader can view the data, an unauthorized identity
    cannot query it, and there is no anonymous dashboard route.
 6. Only then enable a controlled real-client telemetry sample. Source identity,
    worktree attribution, and accounting deduplication need independent proof.
    Real-history assessment remains a separate approval.
 
-## What to report back
-
-Confirm steps 1-4 are ready, the selected endpoint/API type, and whether the
-endpoint is reachable from this Mac. Keep actual endpoint/deployment/model
-configuration in your local `.env`; no keys or tokens are needed in chat.
 If you encounter a failure, share the command and sanitized error, not
 `azd env get-values`, token output, or connection strings.
 

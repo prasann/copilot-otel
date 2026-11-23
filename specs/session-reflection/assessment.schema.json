@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Local synthetic assessment; not the dashboard export contract",
+  "title": "Local session assessment; not the dashboard export contract",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "rubric_version", "session_id", "revision", "snapshot_sha256", "model", "segments", "limitations", "unknown_dimensions", "recommendations"],
