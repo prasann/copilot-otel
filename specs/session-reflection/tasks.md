@@ -1,7 +1,8 @@
 # Working pilot checklist
 
 Current focus: **4. Install the local pipeline**. Azure model, summary ingestion,
-and initial dashboard/query smoke checks are complete. Visual verification is deferred.
+and initial dashboard/query smoke checks are complete. User screenshots confirm
+dashboard rendering and datasource access; browser filter interaction remains unchecked.
 
 Work through one basic smoke test per connection, then install the pilot.
 Check items only after the stated outcome is verified. Record blockers here.
@@ -28,7 +29,8 @@ Real-history inference requires separate approval; this checklist does not enabl
 - [x] Add a labelled synthetic OTLP connection-check panel; deploy/read back its definition and verify exact counts plus wildcard/exact-project/time filters through CLI.
 - [ ] Add live project-level usage and collector freshness/error panels after the collector is connected.
 - [x] Verify project/time filters and query access for the signed-in identity with actual data through CLI.
-- [ ] User visual check later: portal rendering, Azure Monitor datasource selection, project/time controls. Not a blocker for CLI development.
+- [x] User screenshots confirm portal rendering and working Azure Monitor datasource access: summary/freshness rows and expected synthetic OTLP counts are visible.
+- [ ] User visual check later: exercise project/time controls in the browser. Controls are visible; filtering is already CLI-verified. Not a blocker.
 
 ## 4. Install the local pipeline
 
@@ -58,10 +60,10 @@ Real-history inference requires separate approval; this checklist does not enabl
 - One reviewed summary accepted and queried back with every published field matched. Stored columns contain only the intended assessment fields and Azure system columns. Initial table ingestion took several minutes; no republish was needed. DCR diagnostics reported one row received, no drops, and no transformation errors.
 - Repo-backed `dashboardDefinitions/default` deployed using azd and read back through ARM; panels, queries, bindings, and variables match the repo. Both panel queries execute with the synthetic row. Exact project match returns one row; a different project and excluded time range return none. Freshness shows one synthetic assessment.
 - Signed-in identity can ingest and query. Separate least-privilege-reader/unauthorized-identity tests have not been performed.
-- User requested CLI-first verification; browser login is unavailable. Defer visual checks to the user rather than block installation work.
+- User requested CLI-first verification; integrated-browser login is unavailable. User-provided portal screenshots on 2026-11-23 confirm rendering and datasource access. Browser filter interaction remains unchecked.
 - Real-history inference is not approved.
 - Native collector is running with no Copilot clients connected. Both synthetic spans are query-verified with exact metadata; content/schema/scope/event/link canaries and invalid values were removed. Native OTLP uses acknowledged HTTP rather than the legacy fire-and-forget exporter. Queue crash/replay and permanent-rejection behavior have not been live-tested; this is not delivery certification.
-- Collector checkpoint: 10 targeted lifecycle/privacy/infrastructure tests pass, Bicep lint and editor diagnostics pass, and the five-panel dashboard definition matches ARM read-back. The connection table shows two synthetic spans and 100 input / 20 output / 10 cache-read tokens. Visual rendering remains deferred.
+- Collector checkpoint: 10 targeted lifecycle/privacy/infrastructure tests pass, Bicep lint and editor diagnostics pass, and the five-panel dashboard definition matches ARM read-back. User screenshots also confirm the connection table shows two synthetic spans and 100 input / 20 output / 10 cache-read tokens.
 - Batch capture, retention jobs, and daily assessment launchd installation remain unimplemented. No real session history has been read or sent by this smoke test.
 
 ## Deferred until the pilot is useful
