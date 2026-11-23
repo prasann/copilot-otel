@@ -5,8 +5,8 @@
 Prepare Azure access and the existing model deployment, then preview and
 provision the monitoring baseline using section 5. The repo's local demo
 does not itself connect to Azure. A separate explicit synthetic runner/publisher
-now connects to Azure. Native client collection and scheduled processing remain
-unimplemented.
+now connects to Azure. A native macOS collector supports synthetic traces;
+real-client configuration and scheduled processing remain unimplemented.
 
 The pilot's first model request and reviewed summary upload/query-back succeeded.
 Dashboard definitions and project/time-filtered KQL were verified through CLI.
@@ -17,6 +17,9 @@ development. Progress is tracked in the [pilot checklist](../specs/session-refle
 [infra/core.bicep](../infra/core.bicep). They now provision Log Analytics,
 workspace-based Application Insights, an assessment table/direct ingestion rule,
 scoped user roles, and a portal Grafana dashboard with repo-backed initial panels.
+Native trace ingestion adds a collection endpoint and separate telemetry DCR,
+referencing the existing Application Insights/workspace. No Azure Monitor
+metrics workspace is needed for this traces-only slice.
 **No dedicated Azure Managed Grafana instance or model deployment is created.**
 
 Target: repo-backed Bicep and `azd` for provisioning, Azure CLI authentication for
@@ -70,8 +73,8 @@ azd env set AZURE_LOCATION <monitoring-region>
 
 The template obtains `AZURE_PRINCIPAL_ID` from the signed-in `azd` user. It
 assigns that user Log Analytics Reader on the workspace, Reader on Application
-Insights and the dashboard, and Monitoring Metrics Publisher on the assessment
-data collection rule. The current pilot targets an interactive user, not a
+Insights and the dashboard, and Monitoring Metrics Publisher separately on the
+assessment and telemetry data collection rules. The current pilot targets an interactive user, not a
 service principal/CI identity. It creates no app registrations or credentials.
 
 The local `.azure/` directory is ignored. Do not commit it or dump its contents
@@ -127,8 +130,8 @@ Microsoft documents Azure Monitor Logs and Application Insights traces as
 supported sources. The dashboard experience has no additional dashboard charge;
 ingestion, retention, and other Azure services can still incur costs.
 
-We still need to test our actual summary rendering, KQL queries, shared
-project/time filters, and permissions with data. Do not create a dedicated
+Summary KQL, project/time filters, and current-identity query access were tested
+with synthetic data; visual rendering remains a user check. Do not create a dedicated
 Managed Grafana instance to work around an untested limitation.
 
 "Private" here initially means authenticated and RBAC-restricted, not necessarily
@@ -159,6 +162,9 @@ Review the preview before applying:
 - Assessment table `CopilotAssessments_CL`: 90 days of retention.
 - Direct data collection rule: typed fields with explicit projection, no
   overflow capture; Monitoring Metrics Publisher scoped to this rule.
+- Native OTLP collection endpoint and telemetry DCR: traces only, same region,
+  existing Application Insights/workspace reference, publisher scoped to this
+  separate rule. Uses the documented Azure OTLP layout, not the legacy exporter.
 - Portal resource `Microsoft.Dashboard/dashboards`, not the dedicated
   `Microsoft.Dashboard/grafana` resource type.
 - No model resources, Docker hosts, secrets, or subscription-wide role grants.
@@ -183,13 +189,22 @@ azd env get-value GRAFANA_DASHBOARD_RESOURCE_ID
 azd env get-value ASSESSMENT_DCR_IMMUTABLE_ID
 azd env get-value ASSESSMENT_LOGS_INGESTION_ENDPOINT
 azd env get-value ASSESSMENT_STREAM_NAME
+azd env get-value TELEMETRY_TRACES_ENDPOINT
+azd env get-value TELEMETRY_DCR_RESOURCE_ID
 ```
 
 `LOG_ANALYTICS_WORKSPACE_ID` is the ARM resource ID; the separate
 `LOG_ANALYTICS_WORKSPACE_CUSTOMER_ID` is the workspace query GUID.
 No connection string is output. The old collector configuration is **not**
-compatible with the Entra-only baseline; do not enable it. Exporter
-authentication, durable delivery, and the metadata allowlist remain to be built.
+compatible with the Entra-only baseline; do not enable it. Use the
+[native macOS installer](../README.md#native-macos-collector) instead.
+Its standard OTLP HTTP exporter uses Azure CLI authentication and a bounded
+disk queue after metadata filtering. It avoids the legacy Azure Monitor
+exporter's internal fire-and-forget transport. The DCR follows Microsoft's
+[native OTLP guidance](https://learn.microsoft.com/azure/azure-monitor/containers/opentelemetry-protocol-ingestion)
+with both agent and direct trace source declarations; no agent is installed on
+Azure. Native tables are `OTelSpans`, `OTelEvents`, and `OTelResources`, not the
+legacy Application Insights request/dependency tables.
 
 The assessment DCR accepts only the columns declared in
 [infra/core.bicep](../infra/core.bicep): assessment/session identity, revision and
@@ -203,8 +218,10 @@ events automatically and is not approved for real histories.
 
 Open the Application Insights resource > **Dashboards with Grafana** after
 provisioning. The deployed dashboard is tagged for that gallery and includes
-assessment-summary/freshness panels and an explicit "not collecting yet" telemetry
-status. [The JSON definition](../dashboards/copilot-pilot.json) is deployed through
+assessment-summary/freshness panels, a labelled synthetic OTLP connection check,
+and an explicit "not collecting yet" real-usage status. The connection check
+shows authored counts (100 input, 20 output, 10 cache-read tokens), not a model
+call or real coding-session usage. [The JSON definition](../dashboards/copilot-pilot.json) is deployed through
 the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resource
 (`2025-09-01-preview`), not unsupported properties on the parent. Browser rendering
 and datasource selection still require a portal check. See the
@@ -224,7 +241,7 @@ review and clean up those resources separately. Only run `azd down` after
 confirming the selected environment contains exclusively disposable pilot
 resources. Never use it on an environment containing an existing/shared model.
 
-Still pending: metadata exporter, real-history publisher validation, live usage
+Still pending: real-client metadata verification, real-history publisher validation, live usage
 panels, and local retention/scheduling. Cloud assessment retention is configured
 here; no native client history is deleted. Use the
 [pilot checklist](../specs/session-reflection/tasks.md) for current progress and

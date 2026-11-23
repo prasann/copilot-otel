@@ -36,6 +36,7 @@ class InfrastructureTests(unittest.TestCase):
             "Microsoft.Insights/components",
             "Microsoft.OperationalInsights/workspaces/tables",
             "Microsoft.Insights/dataCollectionRules",
+            "Microsoft.Insights/dataCollectionEndpoints",
             "Microsoft.Dashboard/dashboards",
             "Microsoft.Dashboard/dashboards/dashboardDefinitions",
         })
@@ -47,7 +48,8 @@ class InfrastructureTests(unittest.TestCase):
         definition = self.resources["Microsoft.Dashboard/dashboards/dashboardDefinitions"]
         self.assertIn("serializedData", definition["properties"])
         dashboard = json.loads((ROOT / "dashboards/copilot-pilot.json").read_text())
-        self.assertIn("not collecting", dashboard["panels"][-1]["title"])
+        missing_telemetry = next(panel for panel in dashboard["panels"] if panel["id"] == 4)
+        self.assertIn("not collecting", missing_telemetry["title"])
         for panel in dashboard["panels"]:
             for target in panel.get("targets", []):
                 query = target["azureLogAnalytics"]["query"]
@@ -68,7 +70,9 @@ class InfrastructureTests(unittest.TestCase):
         self.assertEqual(table["totalRetentionInDays"], 90)
 
     def test_direct_ingestion_projects_explicit_columns_without_overflow(self) -> None:
-        rule = self.resources["Microsoft.Insights/dataCollectionRules"]
+        rule = next(resource for resource in self.core["resources"]
+                    if resource["type"] == "Microsoft.Insights/dataCollectionRules"
+                    and resource.get("kind") == "Direct")
         self.assertEqual(rule["kind"], "Direct")
         flow, = rule["properties"]["dataFlows"]
         self.assertFalse(flow["captureOverflow"])
@@ -84,7 +88,7 @@ class InfrastructureTests(unittest.TestCase):
     def test_roles_are_scoped_and_outputs_do_not_export_credentials(self) -> None:
         roles = [resource for resource in self.core["resources"]
                  if resource["type"] == "Microsoft.Authorization/roleAssignments"]
-        self.assertEqual(len(roles), 4)
+        self.assertEqual(len(roles), 5)
         for role in roles:
             self.assertIn("scope", role)
             self.assertNotEqual(role["scope"], "[subscription().id]")

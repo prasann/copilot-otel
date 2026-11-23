@@ -9,8 +9,10 @@ Telemetry is a separate supporting pipeline, not a proxy for productivity.
 Native client runtime configuration remains unchanged. The repo's `azd` template
 has deployed the Entra-authenticated monitoring baseline and initial portal
 Grafana panels, without dedicated Managed Grafana. One synthetic Azure model
-smoke request succeeded; the publisher is synthetic-only. Browser rendering,
-native collection, scheduling, and real-content approval remain pending.
+smoke request succeeded; the publisher is synthetic-only. A native macOS collector
+and Entra-only OTLP path now pass synthetic filtering and Azure query-back checks.
+Real-client configuration, verified native accounting/attribution, browser
+rendering, scheduling, and real-content approval remain pending.
 See the [pilot checklist](specs/session-reflection/tasks.md) and
 [Azure setup checklist](docs/azure-setup.md). The working-pilot rollout uses basic
 connection checks first; the larger model comparison is deferred, not passed.

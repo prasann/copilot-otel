@@ -20,8 +20,9 @@ storage. Real-history model inference requires separate approval.
   One reviewed summary was ingested and queried back with stored fields verified.
 - Dashboard definition read-back and both panel queries/project-time filtering
   have been checked through Azure CLI. Visual rendering remains a user check.
-- Native capture/export, daily scheduling, real-history inference, and reliable
-  telemetry delivery are not enabled. Usage panels clearly mark that missing source.
+- A native macOS collector and Entra-authenticated OTLP ingestion path are
+  installed on the pilot Mac; synthetic privacy checks and Azure query-back pass.
+  No Copilot clients, real-history inference, or daily worker are enabled.
 
 See [PLAN.md](PLAN.md) for the architecture,
 [SPIKES.md](SPIKES.md) for feasibility evidence, and
@@ -38,10 +39,11 @@ The existing [azure.yaml](azure.yaml) uses [Bicep](infra/main.bicep) to create:
 | Resource | Purpose |
 | --- | --- |
 | Log Analytics workspace | Shared query destination; 30-day default retention |
-| Workspace-based Application Insights | Future metadata-only OTel destination; Entra-only ingestion |
+| Workspace-based Application Insights | Entra-only application reference for native OTLP traces |
+| Telemetry collection endpoint and rule | Acknowledged OTLP HTTP ingestion into the same workspace |
 | Assessment table and direct data collection rule | Typed derived-summary ingestion; 90-day table retention |
-| Azure Monitor Grafana dashboard and definition | Derived-summary/freshness panels and explicit telemetry status, without a dedicated Grafana instance |
-| Scoped role assignments | Pilot user can read data/dashboard and publish to the assessment rule |
+| Azure Monitor Grafana dashboard and definition | Summary/freshness panels, synthetic OTLP check, and explicit missing real-usage status |
+| Scoped role assignments | Pilot user can read data/dashboard and publish to the assessment and telemetry rules |
 
 No Azure OpenAI/model deployment, API keys, app registrations, Docker hosts, or
 dedicated Managed Grafana Standard instance are created. The existing model is
@@ -67,8 +69,8 @@ The portal dashboard uses your signed-in user's data permissions, not a Grafana
 managed identity. Provisioning installs the repo-backed
 [dashboard definition](dashboards/copilot-pilot.json) through the documented
 `dashboardDefinitions` child resource API. Browser rendering and datasource
-selection still need a signed-in portal check. Usage is explicitly unavailable
-until native telemetry is connected.
+selection still need a signed-in portal check. Real usage is explicitly unavailable
+until real-client accounting and project identity are verified.
 
 Local `.env` and `.azure/` configuration stay ignored. Commit templates and
 non-secret examples, not environment outputs, credentials, or raw histories.
@@ -123,6 +125,53 @@ this is not a general semantic redactor and must not be used for real histories.
 Source timestamps are synthetic and labelled as such. A successful upload means
 accepted, not query-verified: if query-back reports propagation pending, retry
 only the read command later, not the upload.
+
+## Native macOS collector
+
+After provisioning the same `azd` environment and signing into Azure CLI:
+
+```bash
+.venv/bin/python -m tools.native_collector install
+.venv/bin/python -m tools.native_collector smoke
+.venv/bin/python -m tools.native_collector query-smoke <returned-receipt-file>
+```
+
+Installation downloads a SHA256-checked, pinned official collector and creates a
+user LaunchAgent. It does **not** configure any Copilot client. The synthetic
+command makes no model call; it tests two spans, including deliberately invalid
+metadata and prohibited-content canaries. Retry only query-back if ingestion is
+still propagating; do not resend to work around query lag.
+
+The receiver listens only on `127.0.0.1:4318` (HTTP traces); health is on
+`127.0.0.1:13133`, collector metrics on `127.0.0.1:8888`. Names, scope/resource
+strings, schemas, status text, events, links, and non-allowlisted attributes are
+removed or normalized before persistence/upload. Token counts must be nonnegative
+integers; model labels are bounded identifiers, not arbitrary strings. Native
+accounting/project identity is still unverified and defaults to unattributed.
+
+The standard OTLP HTTP exporter uses Azure CLI identity only, with no keys or
+stored bearer tokens. Its queue holds up to 128 requests in a database capped at
+64 MiB. There is no in-memory batch processor before that queue. Retryable
+delivery failures remain queued across restarts; permanent rejections and a full
+queue are errors, **not** guaranteed delivery. HTTP acceptance is not query-back
+or exactly-once proof; crash/replay durability has not yet been live-tested.
+
+```bash
+.venv/bin/python -m tools.native_collector status
+curl --fail http://127.0.0.1:13133
+.venv/bin/python -m tools.native_collector stop
+.venv/bin/python -m tools.native_collector start
+# To update configuration, stop first, then run install again.
+.venv/bin/python -m tools.native_collector uninstall
+```
+
+Failed startup unloads the service rather than leaving a launchd restart loop.
+Uninstall removes only its recognized LaunchAgent and retains state/queue/logs
+under `~/Library/Application Support/copilot-otel`. Logs are warn/error level
+and not yet rotated; inspect `logs/collector.stderr.log` there for delivery
+errors. Collector health means local availability, not Azure delivery. An expired
+CLI login requires `az login`; no alternate credential type is used.
+The LaunchAgent runs after user login, not as a system-wide daemon.
 
 ## Deployment validation
 

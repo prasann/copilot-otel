@@ -62,3 +62,5 @@ output ASSESSMENT_DCR_IMMUTABLE_ID string = core.outputs.assessmentRuleImmutable
 output ASSESSMENT_LOGS_INGESTION_ENDPOINT string = core.outputs.assessmentIngestionEndpoint
 output ASSESSMENT_STREAM_NAME string = core.outputs.assessmentStream
 output ASSESSMENT_TABLE_NAME string = core.outputs.assessmentTableName
+output TELEMETRY_TRACES_ENDPOINT string = core.outputs.telemetryTracesEndpoint
+output TELEMETRY_DCR_RESOURCE_ID string = core.outputs.telemetryRuleId

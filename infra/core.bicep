@@ -181,6 +181,91 @@ resource appInsightsReader 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
+// Native OTLP HTTP acknowledges ingestion; avoid the legacy fire-and-forget exporter.
+resource telemetryEndpoint 'Microsoft.Insights/dataCollectionEndpoints@2024-03-11' = {
+  name: '${assessmentRuleName}-otlp'
+  location: location
+  tags: tags
+  properties: {
+    networkAcls: {
+      publicNetworkAccess: 'Enabled'
+    }
+  }
+}
+
+var traceStreams = [
+  'Microsoft-OTel-Traces-Spans'
+  'Microsoft-OTel-Traces-Events'
+  'Microsoft-OTel-Traces-Resources'
+]
+
+resource telemetryRule 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
+  name: '${assessmentRuleName}-otlp'
+  location: location
+  tags: tags
+  properties: {
+    description: 'Metadata-only native OTLP traces; filtering occurs before local queue and upload.'
+    dataCollectionEndpointId: telemetryEndpoint.id
+    references: {
+      applicationInsights: [
+        {
+          resourceId: appInsights.id
+          name: 'application'
+        }
+      ]
+    }
+    dataSources: {
+      otelTraces: [
+        {
+          streams: traceStreams
+          enrichWithResourceAttributes: ['*']
+          enrichWithReference: 'application'
+          replaceResourceIdWithReference: true
+          name: 'agent-traces'
+        }
+      ]
+    }
+    directDataSources: {
+      otelTraces: [
+        {
+          streams: traceStreams
+          enrichWithResourceAttributes: ['*']
+          enrichWithReference: 'application'
+          replaceResourceIdWithReference: true
+          name: 'traces'
+        }
+      ]
+    }
+    destinations: {
+      logAnalytics: [
+        {
+          workspaceResourceId: logAnalytics.id
+          name: 'workspace'
+        }
+      ]
+    }
+    dataFlows: [
+      {
+        streams: traceStreams
+        destinations: ['workspace']
+      }
+    ]
+  }
+}
+
+resource telemetryPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(telemetryRule.id, principalId, 'Monitoring Metrics Publisher')
+  scope: telemetryRule
+  properties: {
+    principalId: principalId
+    principalType: 'User'
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '3913510d-42f4-4e42-8a64-420c390055eb'
+    )
+  }
+}
+
 output logAnalyticsId string = logAnalytics.id
 output logAnalyticsCustomerId string = logAnalytics.properties.customerId
 output appInsightsName string = appInsights.name
@@ -191,3 +276,5 @@ output assessmentRuleImmutableId string = assessmentRule.properties.immutableId
 output assessmentIngestionEndpoint string = assessmentRule.properties.endpoints.logsIngestion
 output assessmentStream string = inputStream
 output assessmentTableName string = tableName
+output telemetryTracesEndpoint string = '${telemetryEndpoint.properties.logsIngestion.endpoint}/datacollectionRules/${telemetryRule.properties.immutableId}/streams/Microsoft-OTLP-Traces/otlp/v1/traces'
+output telemetryRuleId string = telemetryRule.id
