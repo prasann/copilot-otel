@@ -14,8 +14,8 @@ current service health.
 | Area | Implemented / recorded evidence | Still pending |
 | --- | --- | --- |
 | Session reflection | Read-only native capture, bounded worker, retention, daily scheduling, reviewed-summary publisher | First eligible real capture, assessment, and published-summary query-back |
-| Metadata telemetry | Native macOS collector, filtering before disk queue, synthetic privacy and Azure query-back checks | Insiders reload and real-span delivery; project attribution and usage accounting |
-| Azure dashboard | Monitoring baseline and latest dashboard deployed (user-confirmed); initial query checks and earlier rendering confirmed | Verify latest rendering and portal controls |
+| Metadata telemetry | Native macOS collector, filtering before disk queue, synthetic privacy/query-back checks; opt-in project attribution tested offline | Controlled live attribution/query-back; usage accounting |
+| Azure dashboard | Monitoring baseline and previous dashboard deployed (user-confirmed); attribution diagnostic columns added locally | Deploy attribution diagnostics; verify rendering and portal controls |
 | Assessment quality | Rubric, schemas, separate evaluation fixtures, one bounded Azure synthetic model call | Repeated scored evaluation, longer inputs, local/Azure comparison |
 
 The last recorded pilot setup on **23 November 2026** enabled reflection for new
@@ -26,7 +26,7 @@ Insiders metadata export was also configured globally, but real-span arrival
 was not verified. These are recorded setup results, not a live health report.
 New installations keep inference and scheduling disabled until explicitly enabled.
 
-Azure deployment, including the latest dashboard refresh, was confirmed complete
+Azure deployment, including the last recorded dashboard refresh, was confirmed complete
 on **23 November 2026**. Live acceptance checks below remain separate.
 
 ### Pending acceptance
@@ -172,6 +172,82 @@ clients need separate configuration and verification.
 .venv/bin/python -m tools.native_collector uninstall
 ```
 
+### Opt-in project attribution
+
+The default receiver on `127.0.0.1:4318` still marks spans `unattributed`.
+An optional local gateway on `127.0.0.1:4319` resolves exact session identities
+against the read-only native catalog and persisted host/SDK ID mapping. It sends
+approved aliases to a separate collector receiver on `127.0.0.1:4320`, which
+filters before its existing disk queue. Raw workspace paths are never added to
+exports. Attribution does not verify usage accounting.
+
+Create a private JSON policy outside Git (replace these paths with full absolute
+paths; JSON values do not expand `~` or environment variables):
+
+```json
+{
+  "version": 1,
+  "editor": "/Users/you/Library/Application Support/Code - Insiders",
+  "projects": {
+    "personal/copilot-otel": "/absolute/path/to/copilot-otel",
+    "work/example": "/absolute/path/to/another-project"
+  }
+}
+```
+
+Only exact, explicitly approved project workspaces are eligible. Duplicate
+folder names are supported; overlapping project roots and `synthetic/demo` are
+rejected. Attribution policy is independent of reflection/content-analysis
+approval and enables no model calls. Existing native sessions can identify
+**new incoming spans**; no old telemetry or conversation history is replayed.
+
+After reviewing that scope, opt in explicitly:
+
+```bash
+chmod 600 /absolute/path/to/attribution-policy.json
+.venv/bin/python -m tools.native_collector stop
+.venv/bin/python -m tools.native_collector install \
+  --attribution-policy /absolute/path/to/attribution-policy.json
+.venv/bin/python -m tools.attribution \
+  --policy /absolute/path/to/attribution-policy.json
+```
+
+The gateway runs **in the foreground**; keep that terminal open. It is not
+installed as a login service. In another terminal, check
+`curl --fail http://127.0.0.1:4319/health`, then change only
+`github.copilot.chat.otel.otlpEndpoint` to `http://127.0.0.1:4319` and reload
+Insiders. Health checks prove local reachability, not Azure delivery or complete
+identity coverage. Policy is loaded at gateway startup; policy changes require
+restarting the gateway and reinstalling the collector with the updated policy.
+The dedicated receiver trusts local processes; loopback is not an authentication
+boundary against other processes/users on the same machine.
+
+This first slice supports uncompressed OTLP HTTP/JSON and the tested local
+Agent Host default-chat schemas only. It reads no conversation/event files.
+Unknown, missing, conflicting, unsupported, or changing identities remain
+`unattributed`, with fixed `attribution.reason` values; there is no active-project,
+basename, timestamp, or parent-trace guessing. Schema/lookup failures are warned,
+not silently treated as a successful lookup. Subagent, remote, multi-chat, and
+other-client coverage still need controlled proof.
+
+The gateway has no disk spool or automatic forwarding retries. Requests and
+responses are bounded to 1 MiB, exports to 10,000 spans, and socket operations to
+10 seconds. Downstream rejections/failures are reported to the client; collector
+partial-success responses are preserved. Client retries can replay spans, and
+stopped clients/gateways can lose telemetry. Logs contain fixed reasons/counts,
+not payloads or workspace paths. Existing collector logs are not rotated.
+
+Before claiming live support, send controlled sessions from two approved
+projects, query back their exact identities/aliases and absence of paths, then
+verify project filters in the deployed dashboard. Offline binary tests do not
+establish real-client/Azure acceptance. The new dashboard attribution status/reason
+columns also require a separate reviewed infrastructure deployment; installing
+the gateway does not deploy them.
+
+To disable: restore the client endpoint to `http://127.0.0.1:4318`, reload, stop
+the gateway with Ctrl-C, then stop/reinstall the collector without
+`--attribution-policy`. Historical Azure records are unchanged.
+
 If query-back is pending, retry the read, not `smoke`. Local health is not proof
 of Azure delivery. State, queue, and warn/error logs are retained under
 `~/Library/Application Support/copilot-otel`; inspect `logs/collector.stderr.log`
@@ -222,8 +298,9 @@ or an exact project ID; refresh is five minutes.
 
 - Spans are observations, **not billable calls or token totals**. Invocation and
   model-call spans may overlap, so their tokens are not summed.
-- Native spans remain `unattributed` with accounting unverified. Project filters
-  cannot reconstruct missing identity.
+- Direct native spans remain `unattributed`; the opt-in gateway can label exact,
+  approved session identities. Accounting remains unverified. Project filters
+  cannot reconstruct missing identity or relabel historical rows.
 - Queries deduplicate replayed spans and assessment revisions before time filtering.
   Lookbacks are capped at 30 days for spans and 90 days for assessments.
 - Synthetic smoke records are excluded. Real assessments appear only after
@@ -274,6 +351,7 @@ the job. Scheduling does not wake the Mac or automatically upload results.
 | Location | Responsibility |
 | --- | --- |
 | [tools/](tools/) | Native capture, daily reflection, shared assessment validation, optional smoke tools, collector lifecycle |
+| [tools/attribution.py](tools/attribution.py) | Opt-in metadata-only project resolver and foreground OTLP gateway |
 | [collector/native-config.json](collector/native-config.json) | Trace privacy filter, authentication, durable queue |
 | [infra/](infra/) | Azure resources and scoped RBAC |
 | [dashboards/copilot-pilot.json](dashboards/copilot-pilot.json) | Single current dashboard |

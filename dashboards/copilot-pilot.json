@@ -1,9 +1,9 @@
 {
   "uid": "copilot-reflection-pilot",
   "title": "Copilot reflection and telemetry - pilot",
-  "description": "Derived assessments and filtered native telemetry. Project attribution and usage accounting remain unverified; raw spans are not usage totals.",
+  "description": "Derived assessments and filtered native telemetry. Project attribution is opt-in with live acceptance pending; usage accounting remains unverified.",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "editable": true,
   "timezone": "browser",
   "time": {"from": "now-7d", "to": "now"},
@@ -37,7 +37,7 @@
       "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
       "options": {
         "mode": "markdown",
-        "content": "### Reflection + activity\nReviewed assessments and metadata-only telemetry for the selected project and time range.\n\n**Accounting and telemetry project attribution are unverified.** Spans are observations, not billable calls or token totals. Missing labels stay `unattributed`. Daily assessment uses the separately enabled **Copilot Daily Session Review** job; results require reviewed publishing. Setup notes below are not live health signals."
+        "content": "### Reflection + activity\nReviewed assessments and metadata-only telemetry for the selected project and time range.\n\n**Accounting is unverified; opt-in attribution awaits live acceptance.** Spans are observations, not billable calls or token totals. Direct or unresolved spans stay `unattributed`. Daily assessment uses the separately enabled **Copilot Daily Session Review** job; results require reviewed publishing. Setup notes below are not live health signals."
       }
     },
     {
@@ -315,7 +315,7 @@
                 "resources": ["__WORKSPACE_RESOURCE_ID__"],
                 "dashboardTime": false,
                 "resultFormat": "table",
-                "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
+                "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Attribution=tostring(Attributes['attribution.status']), AttributionReason=tostring(Attributes['attribution.reason']), Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
               }
             }
           ]
@@ -336,7 +336,7 @@
           "gridPos": {"x": 0, "y": 26, "w": 12, "h": 8},
           "options": {
             "mode": "markdown",
-            "content": "### Reading the numbers\nThe background collector runs continuously. Reload VS Code Insiders to activate its global metadata export. This setup description is not a live health signal.\n\nThe cards and charts count **observed spans**, not validated usage totals. Invocation and model-call spans may overlap, so their token counts must not be summed. Model labels are observations, not verified model calls.\n\nProject labels remain `unattributed` until native workspace identity is verified; selecting a named project cannot recover missing labels. Last span time indicates data freshness, **not current process health**.\n\nThe time picker filters assessment creation time and span start time. Assessment lookback is capped at 90 days; telemetry at 30 days. No data does not prove that the collector is healthy or stopped."
+            "content": "### Reading the numbers\nThe background collector runs continuously. The optional attribution gateway runs separately and must also be running when selected as the client endpoint. This setup description is not a live health signal.\n\nThe cards and charts count **observed spans**, not validated usage totals. Invocation and model-call spans may overlap, so their token counts must not be summed. Model labels are observations, not verified model calls.\n\nThe opt-in gateway resolves exact approved local session identities before queueing. Direct, unsupported, or unresolved spans remain `unattributed`; inspect AttributionReason for gateway diagnostics. Selecting a named project cannot recover missing labels or change historical rows. Live two-project acceptance remains pending. Last span time indicates data freshness, **not current process health**.\n\nThe time picker filters assessment creation time and span start time. Assessment lookback is capped at 90 days; telemetry at 30 days. No data does not prove that the collector is healthy or stopped."
           }
         },
         {

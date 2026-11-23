@@ -1,11 +1,13 @@
 """Install and control a user-owned macOS collector; never configure Copilot clients."""
 
 import argparse
+import copy
 import hashlib
 import json
 import os
 import platform
 import plistlib
+import re
 import shutil
 import socket
 import subprocess
@@ -21,6 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from tools.azure_pilot import ROOT, azd_value, rest
+from tools.attribution import COLLECTOR_PORT, Policy, REASONS
 
 
 VERSION = "0.165.0"
@@ -54,7 +57,9 @@ def credentials_environment() -> dict[str, str]:
     }
 
 
-def configuration(endpoint: str, directory: Path) -> dict[str, Any]:
+def configuration(
+    endpoint: str, directory: Path, attribution_projects: tuple[str, ...] = (),
+) -> dict[str, Any]:
     url = urlsplit(endpoint)
     if (url.scheme != "https" or not url.hostname
             or not url.hostname.endswith(".ingest.monitor.azure.com")
@@ -66,6 +71,53 @@ def configuration(endpoint: str, directory: Path) -> dict[str, Any]:
     config["extensions"]["file_storage"]["directory"] = str(directory / "queue")
     config["extensions"]["file_storage"]["compaction"]["directory"] = str(directory / "compaction")
     config["exporters"]["otlp_http/azure"]["traces_endpoint"] = endpoint
+    if attribution_projects:
+        processor = copy.deepcopy(config["processors"]["transform/metadata"])
+        statements = processor["trace_statements"][0]["statements"]
+        statements[:0] = [
+            f'set(cache["{key}"], attributes["{key}"])'
+            for key in ("project.id", "attribution.status", "attribution.reason")
+        ]
+        statements.append('set(attributes["attribution.reason"], "invalid_gateway_metadata")')
+        for reason in REASONS:
+            if reason != "resolved":
+                statements.append(
+                    f'set(attributes["attribution.reason"], "{reason}") '
+                    f'where cache["attribution.reason"] == "{reason}" '
+                    'and cache["project.id"] == "unattributed" '
+                    'and cache["attribution.status"] == "unattributed"'
+                )
+        for alias in attribution_projects:
+            if not isinstance(alias, str) or not re.fullmatch(
+                r"[a-zA-Z0-9._-]{1,63}/[a-zA-Z0-9._-]{1,63}", alias,
+            ) or alias == "synthetic/demo":
+                raise ValueError("Invalid attribution project alias")
+            condition = (
+                f'cache["project.id"] == "{alias}" '
+                'and cache["attribution.status"] == "attributed" '
+                'and cache["attribution.reason"] == "resolved" '
+                'and cache["origin"] != "synthetic_collector_smoke"'
+            )
+            statements.extend([
+                f'set(attributes["project.id"], "{alias}") where {condition}',
+                f'set(attributes["attribution.status"], "attributed") where {condition}',
+                f'set(attributes["attribution.reason"], "resolved") where {condition}',
+            ])
+        statements.append(
+            'delete_key(attributes, "attribution.reason") '
+            'where cache["origin"] == "synthetic_collector_smoke"'
+        )
+        config["processors"]["transform/attributed"] = processor
+        receiver = copy.deepcopy(config["receivers"]["otlp"])
+        receiver["protocols"]["http"]["endpoint"] = f"127.0.0.1:{COLLECTOR_PORT}"
+        config["receivers"]["otlp/attributed"] = receiver
+        config["service"]["pipelines"]["traces/attributed"] = {
+            "receivers": ["otlp/attributed"],
+            "processors": ["memory_limiter", "transform/attributed"],
+            "exporters": ["otlp_http/azure"],
+        }
+        for signal in ("metrics", "logs"):
+            config["service"]["pipelines"][signal]["receivers"].append("otlp/attributed")
     return config
 
 
@@ -166,13 +218,14 @@ def start() -> dict[str, str]:
                        f"{HOME / 'logs' / 'collector.stderr.log'}")
 
 
-def install() -> dict[str, str]:
+def install(attribution_policy: Path | None = None) -> dict[str, str]:
     if platform.system() != "Darwin":
         raise ValueError("Native installation currently supports macOS only")
     check_owned_plist()
     if service_loaded():
         raise ValueError("Stop the existing collector before reinstalling")
-    for port in (4318, 13133):
+    projects = tuple(Policy.load(attribution_policy).projects) if attribution_policy else ()
+    for port in (4318, 13133, COLLECTOR_PORT) if projects else (4318, 13133):
         with socket.socket() as check:
             if check.connect_ex(("127.0.0.1", port)) == 0:
                 raise ValueError(f"Port {port} is already in use; stop/review the existing listener")
@@ -181,7 +234,7 @@ def install() -> dict[str, str]:
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     HOME.chmod(0o700)
     binary = download(HOME)
-    config = configuration(azd_value("TELEMETRY_TRACES_ENDPOINT"), HOME)
+    config = configuration(azd_value("TELEMETRY_TRACES_ENDPOINT"), HOME, projects)
     config_path = HOME / "collector.json"
     config_path.touch(mode=0o600, exist_ok=True)
     config_path.chmod(0o600)
@@ -317,12 +370,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("install", "status", "stop", "start", "uninstall", "smoke", "query-smoke"))
     parser.add_argument("receipt", type=Path, nargs="?")
+    parser.add_argument("--attribution-policy", type=Path,
+                        help="install only: enable the dedicated local attribution receiver")
     args = parser.parse_args()
     if (args.command == "query-smoke") != (args.receipt is not None):
         parser.error("query-smoke requires a receipt file; other commands take no receipt")
+    if args.attribution_policy and args.command != "install":
+        parser.error("--attribution-policy is supported only with install")
     try:
         if args.command == "install":
-            result = install()
+            result = install(args.attribution_policy)
         elif args.command == "smoke":
             result = smoke()
         elif args.command == "query-smoke":

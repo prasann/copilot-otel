@@ -12,7 +12,7 @@ Operational boundaries: [daily session reflection](docs/session-reflection.md).
 | S3: desktop app | Not run | Independent capture/lifecycle and duplicate-identity proof |
 | S4: useful assessment | Fixtures, schemas, validators, and one Azure synthetic smoke | Repeated quality evaluation, longer input, usefulness review |
 | S5: daily worker | Implemented and explicitly scheduled for next 09:00; local budget/recovery/retention/root-scope tests pass | First real inference, actual wake/login and restart acceptance |
-| T1: native telemetry accounting | Synthetic collector filtering and Azure query-back passed | Real-client identity, accounting layer, exact reconciliation |
+| T1: native telemetry accounting | Synthetic collector filtering and Azure query-back passed; opt-in exact-ID attribution/gateway tested offline with the pinned binary | Controlled live two-project identity/query-back, accounting layer, exact reconciliation |
 
 S1/S2 details, tested versions, limitations, and reproduction steps are in
 [session capture findings](docs/spikes/session-capture-findings.md).
