@@ -1,14 +1,20 @@
 {
   "uid": "copilot-reflection-pilot",
-  "title": "Copilot reflection and telemetry - pilot",
-  "description": "Observed chat tokens by project and model, with reviewed assessments and telemetry diagnostics below. Not billing or complete usage accounting.",
+  "title": "Copilot telemetry and coaching - pilot",
+  "description": "Observed chat tokens by project and model, daily Copilot coaching from Chronicle, and telemetry diagnostics. Not billing or complete usage accounting.",
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "editable": true,
   "timezone": "browser",
-  "time": {"from": "now-7d", "to": "now"},
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "refresh": "5m",
-  "tags": ["copilot", "pilot"],
+  "tags": [
+    "copilot",
+    "pilot"
+  ],
   "templating": {
     "list": [
       {
@@ -24,7 +30,10 @@
         "label": "Project ID (* = all)",
         "type": "textbox",
         "query": "*",
-        "current": {"text": "*", "value": "*"},
+        "current": {
+          "text": "*",
+          "value": "*"
+        },
         "options": []
       }
     ]
@@ -34,10 +43,15 @@
       "id": 1,
       "title": "Copilot at a glance",
       "type": "text",
-      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
       "options": {
         "mode": "markdown",
-        "content": "### Project token usage\nObserved tokens from deduplicated **chat spans only**, filtered by project and time. Agent/tool spans are excluded from token sums to avoid overlapping totals. Cache reads are shown separately, not added to input tokens.\n\nThese are reported observations, **not billing or guaranteed complete usage**. Missing usage is shown in the tables; unresolved projects remain `unattributed`. Assessments and raw telemetry are collapsed below."
+        "content": "### Project token usage\nObserved tokens from deduplicated **chat spans only**, filtered by project and time. Agent/tool spans are excluded from token sums to avoid overlapping totals. Cache reads are shown separately, not added to input tokens.\n\nThese are reported observations, **not billing or guaranteed complete usage**. Missing usage is shown in the tables; unresolved projects remain `unattributed`. Daily Copilot coaching follows; raw telemetry is collapsed below."
       }
     },
     {
@@ -45,24 +59,54 @@
       "title": "Observed input tokens",
       "description": "Sum of reported input tokens on deduplicated chat spans only. Agent/tool spans are excluded. Missing values are not proof of zero usage; this is not billing.",
       "type": "stat",
-      "gridPos": {"x": 0, "y": 3, "w": 6, "h": 4},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No reported usage"
+        },
         "overrides": []
       },
       "options": {
-        "colorMode": "value", "graphMode": "none", "justifyMode": "left",
-        "textMode": "value", "wideLayout": true,
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "left",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens'])\n| summarize InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null))"
@@ -75,24 +119,54 @@
       "title": "Observed output tokens",
       "description": "Sum of reported output tokens on deduplicated chat spans only, not overlapping agent/tool spans. Not billing or guaranteed complete usage.",
       "type": "stat",
-      "gridPos": {"x": 6, "y": 3, "w": 6, "h": 4},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 6,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "#56D4C0"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#56D4C0"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No reported usage"
+        },
         "overrides": []
       },
       "options": {
-        "colorMode": "value", "graphMode": "none", "justifyMode": "left",
-        "textMode": "value", "wideLayout": true,
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "left",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens'])\n| summarize OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null))"
@@ -105,24 +179,54 @@
       "title": "Observed cache-read tokens",
       "description": "Reported cache-read tokens from deduplicated chat spans. Shown separately; never added to input tokens. Missing cache reporting is not treated as zero.",
       "type": "stat",
-      "gridPos": {"x": 12, "y": 3, "w": 6, "h": 4},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "purple"}, "unit": "short", "decimals": 0, "noValue": "No reported usage"},
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "No reported usage"
+        },
         "overrides": []
       },
       "options": {
-        "colorMode": "value", "graphMode": "none", "justifyMode": "left",
-        "textMode": "value", "wideLayout": true,
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "left",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null))"
@@ -135,24 +239,53 @@
       "title": "Last observed span",
       "description": "Latest span start time within the selected range, not collector heartbeat or process health. A historical range can intentionally show an old timestamp.",
       "type": "stat",
-      "gridPos": {"x": 18, "y": 3, "w": 6, "h": 4},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 18,
+        "y": 3,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
-        "defaults": {"color": {"mode": "fixed", "fixedColor": "#56D4C0"}, "unit": "dateTimeFromNow", "noValue": "No spans"},
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#56D4C0"
+          },
+          "unit": "dateTimeFromNow",
+          "noValue": "No spans"
+        },
         "overrides": []
       },
       "options": {
-        "colorMode": "value", "graphMode": "none", "justifyMode": "left",
-        "textMode": "value", "wideLayout": true,
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "left",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastSpan=max(TimeGenerated)\n| project LastSpan=tolong((LastSpan - datetime(1970-01-01)) / 1ms)"
@@ -165,32 +298,60 @@
       "title": "Observed tokens over time",
       "description": "Input, output, and cache-read observations from deduplicated chat spans, bucketed by span start time. Series are not stacked or added together; cache reads may overlap input.",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 7, "w": 24, "h": 8},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "unit": "short", "min": 0, "decimals": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "min": 0,
+          "decimals": 0,
           "custom": {
-            "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2,
-            "fillOpacity": 15, "gradientMode": "opacity",
-            "showPoints": "auto", "spanNulls": false,
-            "axisLabel": "Reported tokens", "axisBorderShow": false
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "gradientMode": "opacity",
+            "showPoints": "auto",
+            "spanNulls": false,
+            "axisLabel": "Reported tokens",
+            "axisBorderShow": false
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": {"showLegend": true, "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "none"}
+        "legend": {
+          "showLegend": true,
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "time_series",
             "timeColumn": "TimeGenerated",
@@ -204,22 +365,40 @@
       "title": "Observed tokens by model",
       "description": "Reported chat-span tokens by model for the selected projects. MissingUsage counts chat spans missing input or output; MissingCache counts spans without cache-read reporting. Null totals mean no reported value.",
       "type": "table",
-      "gridPos": {"x": 0, "y": 22, "w": 24, "h": 7},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
       "fieldConfig": {
         "defaults": {
-          "unit": "short", "decimals": 0, "noValue": "Not reported"
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Not reported"
         },
         "overrides": []
       },
-      "options": {"showHeader": true, "cellHeight": "sm"},
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend Model=tostring(Attributes['gen_ai.response.model'])\n| extend Model=iff(isempty(Model), '(not reported)', Model)\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize ChatSpans=count(), InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null)), OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null)), CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null)), MissingUsage=countif(isnull(InputTokens) or isnull(OutputTokens)), MissingCache=countif(isnull(CacheReadTokens)) by Model\n| order by InputTokens desc"
@@ -232,24 +411,53 @@
       "title": "Observed tokens by project",
       "type": "table",
       "description": "Chat-span observations only, not billing. MissingUsage counts spans without input or output; MissingCache counts spans without cache-read reporting. Unattributed usage is retained separately. Null totals mean no reported value.",
-      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 7},
-      "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-      "options": {"showHeader": true, "cellHeight": "md"},
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 7
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md"
+      },
       "fieldConfig": {
-        "defaults": {"unit": "short", "decimals": 0, "noValue": "Not reported"},
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Not reported"
+        },
         "overrides": [
-          {"matcher": {"id": "byName", "options": "ProjectId"}, "properties": [
-            {"id": "custom.width", "value": 300}
-          ]}
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ProjectId"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
         ]
       },
       "targets": [
         {
           "refId": "A",
           "queryType": "Azure Log Analytics",
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
           "azureLogAnalytics": {
-            "resources": ["__WORKSPACE_RESOURCE_ID__"],
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
             "dashboardTime": false,
             "resultFormat": "table",
             "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'chat'\n| extend InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens'])\n| summarize ChatSpans=count(), InputTokens=iff(countif(isnotnull(InputTokens)) > 0, sum(InputTokens), long(null)), OutputTokens=iff(countif(isnotnull(OutputTokens)) > 0, sum(OutputTokens), long(null)), CacheReadTokens=iff(countif(isnotnull(CacheReadTokens)) > 0, sum(CacheReadTokens), long(null)), MissingUsage=countif(isnull(InputTokens) or isnull(OutputTokens)), MissingCache=countif(isnull(CacheReadTokens)) by ProjectId\n| order by InputTokens desc"
@@ -258,81 +466,271 @@
       ]
     },
     {
+      "id": 20,
+      "title": "Copilot coaching",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Copilot coaching\nDaily `/chronicle tips` and `/chronicle standup` reports from Copilot CLI (VS Code agent sessions included), normalized by the Azure model into short items. Only these derived items are stored here; no prompts, replies, code, or paths. Covers **all projects**; the Project ID filter applies to telemetry panels only."
+      }
+    },
+    {
+      "id": 21,
+      "title": "Most repeated tip theme",
+      "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply. Counts tips in the selected time range.",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^Focus$/"
+        },
+        "textMode": "value_and_name",
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No coaching yet"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "azureLogAnalytics": {
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "CopilotInsights_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by RunId, Kind, Rank\n| where $__timeFilter(TimeGenerated)\n| where Kind == 'tip'\n| summarize Tips=count() by Category\n| top 1 by Tips desc\n| project Focus=Category"
+          }
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Latest tips",
+      "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply.",
+      "type": "table",
+      "gridPos": {
+        "x": 6,
+        "y": 32,
+        "w": 18,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            },
+            "wrapText": true
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "azureLogAnalytics": {
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "let rows = CopilotInsights_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by RunId, Kind, Rank\n| where $__timeFilter(TimeGenerated)\n| where Kind == 'tip';\nrows\n| where RunId == toscalar(rows | summarize arg_max(TimeGenerated, RunId) | project RunId)\n| project Rank, Theme=Category, Tip=Title, Detail, Generated=TimeGenerated\n| order by Rank asc"
+          }
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Tip themes over time",
+      "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply. Recurring themes are the habits to work on.",
+      "type": "timeseries",
+      "interval": "1d",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 10,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            },
+            "lineWidth": 1
+          },
+          "decimals": 0,
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "azureLogAnalytics": {
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
+            "dashboardTime": false,
+            "resultFormat": "time_series",
+            "query": "CopilotInsights_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by RunId, Kind, Rank\n| where $__timeFilter(TimeGenerated)\n| where Kind == 'tip'\n| summarize Tips=count() by bin(TimeGenerated, $__interval), Category\n| order by TimeGenerated asc",
+            "timeColumn": "TimeGenerated"
+          }
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "title": "Latest standup",
+      "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply.",
+      "type": "table",
+      "gridPos": {
+        "x": 10,
+        "y": 40,
+        "w": 14,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "cellOptions": {
+              "type": "auto"
+            },
+            "wrapText": true
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "azureLogAnalytics": {
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "let rows = CopilotInsights_CL\n| where TimeGenerated > ago(90d)\n| summarize arg_max(TimeGenerated, *) by RunId, Kind, Rank\n| where $__timeFilter(TimeGenerated)\n| where Kind == 'standup';\nrows\n| where RunId == toscalar(rows | summarize arg_max(TimeGenerated, RunId) | project RunId)\n| extend Order=case(Category == 'completed', 1, Category == 'today', 2, 3)\n| order by Order asc, Rank asc\n| project Status=Category, Repository, Item=Title, Detail"
+          }
+        }
+      ]
+    },
+    {
       "id": 12,
-      "title": "Inspect data | assessments and raw telemetry",
+      "title": "Inspect data | raw telemetry",
       "type": "row",
       "collapsed": true,
-      "gridPos": {"x": 0, "y": 29, "w": 24, "h": 1},
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 24,
+        "h": 1
+      },
       "panels": [
         {
-          "id": 15,
-          "title": "Reviewed assessment summaries",
-          "description": "Latest published reviewed revision per session. No data means no reviewed summaries match these filters; telemetry does not trigger assessment or automatic publishing.",
+          "id": 5,
+          "title": "Incoming telemetry - raw spans, not usage totals",
           "type": "table",
-          "gridPos": {"x": 0, "y": 30, "w": 24, "h": 9},
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-          "options": {"showHeader": true, "cellHeight": "md"},
-          "fieldConfig": {
-            "defaults": {"custom": {"cellOptions": {"type": "auto"}, "wrapText": true}},
-            "overrides": [
-              {"matcher": {"id": "byName", "options": "TimeGenerated"}, "properties": [
-                {"id": "displayName", "value": "Assessed at"},
-                {"id": "unit", "value": "dateTimeAsLocal"}
-              ]},
-              {"matcher": {"id": "byName", "options": "Summary"}, "properties": [
-                {"id": "custom.width", "value": 480}
-              ]}
-            ]
+          "gridPos": {
+            "x": 0,
+            "y": 50,
+            "w": 24,
+            "h": 7
+          },
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "options": {
+            "showHeader": true
           },
           "targets": [
             {
               "refId": "A",
               "queryType": "Azure Log Analytics",
-              "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
+              "datasource": {
+                "type": "grafana-azure-monitor-datasource",
+                "uid": "${am_ds}"
+              },
               "azureLogAnalytics": {
-                "resources": ["__WORKSPACE_RESOURCE_ID__"],
-                "dashboardTime": false,
-                "resultFormat": "table",
-                "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Outcome, Summary, Origin, Limitations, SessionEndedAt\n| order by TimeGenerated desc"
-              }
-            }
-          ]
-        },
-        {
-          "id": 3,
-          "title": "Assessment freshness by project",
-          "type": "table",
-          "gridPos": {"x": 0, "y": 39, "w": 24, "h": 7},
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-          "options": {"showHeader": true},
-          "targets": [
-            {
-              "refId": "A",
-              "queryType": "Azure Log Analytics",
-              "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-              "azureLogAnalytics": {
-                "resources": ["__WORKSPACE_RESOURCE_ID__"],
-                "dashboardTime": false,
-                "resultFormat": "table",
-                "query": "CopilotAssessments_CL\n| where TimeGenerated > ago(90d)\n| where Origin != 'synthetic_azure_model_smoke'\n| summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision\n| summarize arg_max(Revision, *) by Origin, ProjectId, SessionId\n| where $__timeFilter(TimeGenerated)\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| summarize LastAssessment=max(TimeGenerated), EligibleRowsVisible=count() by ProjectId, Origin\n| extend MinutesSinceAssessment=datetime_diff('minute', now(), LastAssessment)\n| order by LastAssessment desc"
-              }
-            }
-          ]
-        },
-        {
-          "id": 5,
-          "title": "Incoming telemetry - raw spans, not usage totals",
-          "type": "table",
-          "gridPos": {"x": 0, "y": 46, "w": 24, "h": 7},
-          "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-          "options": {"showHeader": true},
-          "targets": [
-            {
-              "refId": "A",
-              "queryType": "Azure Log Analytics",
-              "datasource": {"type": "grafana-azure-monitor-datasource", "uid": "${am_ds}"},
-              "azureLogAnalytics": {
-                "resources": ["__WORKSPACE_RESOURCE_ID__"],
+                "resources": [
+                  "__WORKSPACE_RESOURCE_ID__"
+                ],
                 "dashboardTime": false,
                 "resultFormat": "table",
                 "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, Attribution=tostring(Attributes['attribution.status']), AttributionReason=tostring(Attributes['attribution.reason']), Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
@@ -347,26 +745,41 @@
       "title": "Pilot notes | privacy, accounting and analysis scope",
       "type": "row",
       "collapsed": true,
-      "gridPos": {"x": 0, "y": 30, "w": 24, "h": 1},
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 1
+      },
       "panels": [
         {
           "id": 4,
           "title": "Token accounting and reliability limits",
           "type": "text",
-          "gridPos": {"x": 0, "y": 31, "w": 12, "h": 8},
+          "gridPos": {
+            "x": 0,
+            "y": 51,
+            "w": 12,
+            "h": 8
+          },
           "options": {
             "mode": "markdown",
-            "content": "### Reading the numbers\nToken panels sum only deduplicated **chat spans**. Agent and tool totals are excluded to avoid overlap. Cache-read tokens are separate observations, not an extra amount to add to input. Missing fields are not converted into zero totals; MissingUsage and MissingCache expose incomplete reporting. Transport loss, unsupported clients, subagent overlap, and billing reconciliation remain unverified.\n\nExact approved local session identities determine project aliases. Direct or unresolved spans remain `unattributed`; project selection cannot repair historical rows. Live two-project acceptance remains pending.\n\nLast observed span is data freshness, not process health. The gateway health endpoint checks local reachability, not Azure. Time filters use span start or assessment creation time; lookbacks are capped at 30 and 90 days respectively. Synthetic smoke rows are excluded."
+            "content": "### Reading the numbers\nToken panels sum only deduplicated **chat spans**. Agent and tool totals are excluded to avoid overlap. Cache-read tokens are separate observations, not an extra amount to add to input. Missing fields are not converted into zero totals; MissingUsage and MissingCache expose incomplete reporting. Transport loss, unsupported clients, subagent overlap, and billing reconciliation remain unverified.\n\nExact approved local session identities determine project aliases. Direct or unresolved spans remain `unattributed`; project selection cannot repair historical rows. Live two-project acceptance remains pending.\n\nLast observed span is data freshness, not process health. The gateway health endpoint checks local reachability, not Azure. Time filters use span start time (30-day lookback) and coaching run time (90-day lookback)."
           }
         },
         {
           "id": 14,
-          "title": "Capture boundaries and daily reflection",
+          "title": "Capture boundaries and daily coaching",
           "type": "text",
-          "gridPos": {"x": 12, "y": 31, "w": 12, "h": 8},
+          "gridPos": {
+            "x": 12,
+            "y": 51,
+            "w": 12,
+            "h": 8
+          },
           "options": {
             "mode": "markdown",
-            "content": "### Metadata only\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics.\n\nNo prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\n### Daily reflection is separate\n**Copilot Daily Session Review** processes new archived sessions at **09:00 local time** within an explicitly approved local scope. An approved projects root includes future projects, with no backfill and one shared five-attempt daily budget. The first scheduled assessment is deferred until the next 09:00 run after installation.\n\nAssessments stay local until a derived summary is manually reviewed and published. Published rows describe historical archived revisions, not live source eligibility. Telemetry arriving here does not mean conversations have been analyzed. Check local status for actual enablement and job health."
+            "content": "### Metadata only\nVS Code Insiders is configured to send metadata from **all projects** after a window reload, with content and identity capture disabled. The local collector filters traces before persistence/upload and discards logs and aggregate metrics.\n\nNo prompts, replies, code, tool payloads, or identity fields are permitted in dashboard storage.\n\n### Daily coaching is separate\n**Copilot Daily Coaching** runs `/chronicle tips` and `/chronicle standup` in Copilot CLI at **09:00 local time**. Chronicle analyses session history inside Copilot; only its short reports go to the Azure model, and only validated items (theme, title, detail, repository) are published here. Telemetry arriving here does not trigger coaching. Check `python -m tools.coaching status` for job health."
           }
         }
       ]

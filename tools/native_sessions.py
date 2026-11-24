@@ -1,21 +1,17 @@
-"""Read only explicitly allowlisted, new VS Code Agent Host sessions."""
+"""Read-only VS Code Agent Host session catalog lookups (metadata only, no transcripts)."""
 
 import hashlib
 import json
-import re
 import sqlite3
 import uuid
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 
 EDITOR = Path.home() / "Library/Application Support/Code - Insiders"
-COPILOT = Path.home() / ".copilot"
-MAX_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_SESSIONS = 1000
 
 
@@ -139,172 +135,3 @@ def catalog_candidate(row: tuple[Any, ...], alias: str | None, path: Path) -> Ca
         host_id, alias, path, revision, data["isArchived"], started,
         hashlib.sha256(raw.encode()).hexdigest(), supported,
     )
-
-
-def source_bytes(path: Path) -> bytes:
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_SOURCE_BYTES + 1)
-    if len(raw) > MAX_SOURCE_BYTES:
-        raise CaptureError("source_size_limit_exceeded")
-    if not raw or not raw.endswith(b"\n"):
-        raise CaptureError("incomplete_source_stream")
-    return raw
-
-
-def message_text(content: Any) -> str:
-    if not isinstance(content, str):
-        raise CaptureError("unsupported_message_content")
-    # Omit fenced code and injected context blocks, not just attachment fields.
-    content = re.sub(r"(?ms)^(`{3,}|~{3,}).*?^\1[ \t]*$", "[code block omitted]", content)
-    if re.search(r"(?m)^\s*(`{3,}|~{3,})", content):
-        raise CaptureError("unclosed_code_block")
-    for tag in ("system_reminder", "skill-context", "tagged_files"):
-        content = re.sub(rf"(?s)<{tag}\b[^>]*>.*?</{tag}>", "[context omitted]", content)
-    if re.search(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-        r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
-        r"AKIA[A-Z0-9]{16})\b",
-        content,
-    ):
-        raise CaptureError("possible_secret_requires_review")
-    return content.strip()
-
-
-def project_events(
-    raw: bytes, candidate: Candidate, sdk_id: str, since_ms: int,
-) -> dict[str, Any]:
-    events = [json.loads(line) for line in raw.splitlines()]
-    first = events[0]
-    start = first["data"]
-    cwd = Path(start["context"]["cwd"])
-    if (first["type"] != "session.start" or start.get("version") != 1
-            or start.get("sessionId") != sdk_id
-            or not cwd.is_absolute() or not cwd.resolve().is_relative_to(candidate.workspace)):
-        raise CaptureError("unsupported_runtime_identity")
-    started = datetime.fromisoformat(first["timestamp"].replace("Z", "+00:00"))
-    if started.tzinfo is None or started.timestamp() * 1000 < since_ms:
-        raise CaptureError("preexisting_runtime_excluded")
-
-    pending: dict[str, set[str]] = {kind: set() for kind in ("turn", "tool", "hook", "external")}
-    starts = {
-        "assistant.turn_start": ("turn", "turnId"),
-        "tool.execution_start": ("tool", "toolCallId"),
-        "hook.start": ("hook", "hookInvocationId"),
-        "external_tool.requested": ("external", "requestId"),
-    }
-    ends = {
-        "assistant.turn_end": ("turn", "turnId"),
-        "tool.execution_complete": ("tool", "toolCallId"),
-        "hook.end": ("hook", "hookInvocationId"),
-        "external_tool.completed": ("external", "requestId"),
-    }
-    ignored = {
-        "session.start", "session.resume", "session.shutdown", "session.error", "abort",
-        "session.permissions_changed", "session.model_change", "session.usage_record",
-        "session.usage_checkpoint", "system.message", "instruction.update",
-        "skill.invoked", "skill.invoked_ref", "skill.context_delivered_ref",
-        "human_response.recorded",
-    }
-    projected = []
-    seen = set()
-    waiting_for_response = False
-    ended_turn = False
-    for event in events:
-        kind, data, event_id = event["type"], event["data"], event["id"]
-        if not isinstance(event_id, str) or not event_id or event_id in seen:
-            raise CaptureError("invalid_or_duplicate_event_id")
-        seen.add(event_id)
-        if kind in starts:
-            group, field = starts[kind]
-            identifier = data[field]
-            if not isinstance(identifier, str) or not identifier or identifier in pending[group]:
-                raise CaptureError("ambiguous_lifecycle")
-            pending[group].add(identifier)
-            if group == "turn":
-                waiting_for_response = False
-        elif kind in ends:
-            group, field = ends[kind]
-            identifier = data[field]
-            if identifier not in pending[group]:
-                raise CaptureError("unmatched_lifecycle_end")
-            pending[group].remove(identifier)
-            if group == "turn":
-                ended_turn = True
-            elif group == "tool":
-                success = data.get("success")
-                if type(success) is not bool:
-                    raise CaptureError("unsupported_tool_metadata")
-                projected.append({
-                    "id": event_id, "kind": "tool_result",
-                    "text": f"Tool execution completed; success={str(success).lower()}. "
-                            "Arguments, tool name, and output omitted. "
-                            "This does not verify tests or task success.",
-                })
-        elif kind in ("user.message", "assistant.message"):
-            if data.get("parentAgentTaskId"):
-                raise CaptureError("subagent_coverage_unsupported")
-            if kind == "user.message":
-                waiting_for_response = True
-            if kind == "assistant.message" and data.get("phase") == "analysis":
-                continue
-            text = message_text(data["content"])
-            if text:
-                projected.append({
-                    "id": event_id,
-                    "kind": "user" if kind == "user.message" else "assistant",
-                    "text": text,
-                })
-        elif kind not in ignored:
-            raise CaptureError("unsupported_runtime_event")
-    if any(pending.values()) or waiting_for_response or not ended_turn:
-        raise CaptureError("active_or_uncertain_session")
-    if not any(event["kind"] == "user" for event in projected):
-        raise CaptureError("no_user_messages")
-    return {
-        "id": sdk_id, "revision": candidate.revision, "archived": True,
-        "coverage": "Partial: user/assistant text and tool success flags only. "
-                    "No tool arguments/results, attachments, file reads, reasoning, "
-                    "injected context, or fenced code. Tool success is not test verification.",
-        "events": projected,
-    }
-
-
-@dataclass(frozen=True)
-class Snapshot:
-    candidate: Candidate
-    session: dict[str, Any]
-    source_sha256: str
-
-
-def capture(
-    candidate: Candidate, editor: Path, copilot: Path, since_ms: int,
-) -> Snapshot:
-    if not candidate.supported:
-        raise CaptureError("unsupported_chat_coverage")
-    if not candidate.archived:
-        raise CaptureError("not_archived")
-    mapping = editor / "agentSessionData" / candidate.host_id / "session.db"
-    if not mapping.resolve().is_relative_to(editor.resolve() / "agentSessionData" / candidate.host_id):
-        raise CaptureError("source_path_escaped")
-    with closing(readonly(mapping, 20)) as db:
-        row = db.execute(
-            "SELECT value FROM session_metadata WHERE key = 'defaultChatProviderData'",
-        ).fetchone()
-        if row is None:
-            raise CaptureError("missing_sdk_mapping")
-        sdk_id = str(uuid.UUID(json.loads(row[0])["sdkSessionId"]))
-    path = copilot / "session-state" / sdk_id / "events.jsonl"
-    if not path.resolve().is_relative_to(copilot.resolve() / "session-state" / sdk_id):
-        raise CaptureError("source_path_escaped")
-    raw = source_bytes(path)
-    session = project_events(raw, candidate, sdk_id, since_ms)
-    current, _ = discover(editor, {candidate.project_id: str(candidate.workspace)}, since_ms)
-    if candidate not in current or source_bytes(path) != raw:
-        raise CaptureError("source_changed_during_capture")
-    return Snapshot(candidate, session, hashlib.sha256(raw).hexdigest())
-
-
-def recheck(snapshot: Snapshot, editor: Path, copilot: Path, since_ms: int) -> None:
-    current = capture(snapshot.candidate, editor, copilot, since_ms)
-    if current.source_sha256 != snapshot.source_sha256:
-        raise CaptureError("source_changed_after_capture")

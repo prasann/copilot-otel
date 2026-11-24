@@ -90,17 +90,15 @@ class AttributionTests(unittest.TestCase):
         }]}]}]}
 
     def test_exact_host_sdk_mapping_concurrency_and_duplicate_folder_names(self) -> None:
-        with patch.object(attribution.native, "source_bytes") as read_content:
-            snapshot = self.resolver.snapshot()
-            for identity in self.alpha:
-                self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/alpha")
-            self.assertEqual(snapshot.resolve(self.attributes(
-                self.alpha[1], self.alpha[0])).project, "personal/alpha")
-            for identity in self.beta:
-                self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "work/beta")
-            self.assertEqual(snapshot.resolve(self.attributes(
-                self.alpha[1], self.beta[0])).reason, "identity_conflict")
-            read_content.assert_not_called()
+        snapshot = self.resolver.snapshot()
+        for identity in self.alpha:
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/alpha")
+        self.assertEqual(snapshot.resolve(self.attributes(
+            self.alpha[1], self.alpha[0])).project, "personal/alpha")
+        for identity in self.beta:
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "work/beta")
+        self.assertEqual(snapshot.resolve(self.attributes(
+            self.alpha[1], self.beta[0])).reason, "identity_conflict")
 
     def test_missing_unknown_malformed_and_duplicate_identity_never_guess(self) -> None:
         snapshot = self.resolver.snapshot()

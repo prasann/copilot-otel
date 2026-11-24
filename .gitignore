@@ -23,6 +23,6 @@
 __pycache__/
 *.egg-info/
 
-# Synthetic Azure pilot responses, request budget, and ingestion receipts
+# Collector smoke-test receipts
 .pilot/
 

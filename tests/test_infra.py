@@ -22,7 +22,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_overview_keeps_details_collapsed_and_layout_non_overlapping(self) -> None:
         overview = self.dashboard["panels"]
-        self.assertEqual(sum(panel["type"] == "stat" for panel in overview), 4)
+        self.assertEqual(sum(panel["type"] == "stat" for panel in overview), 5)
         self.assertTrue({"timeseries", "table"} <= {
             panel["type"] for panel in overview
         })
@@ -57,9 +57,9 @@ class DashboardTests(unittest.TestCase):
                     query = source["query"]
                     self.assertEqual(source["resources"], ["__WORKSPACE_RESOURCE_ID__"])
                     self.assertFalse(source["dashboardTime"])
-                    self.assertIn("${project:singlequote}", query)
                     self.assertIn("$__timeFilter(TimeGenerated)", query)
                     if query.startswith("OTelSpans"):
+                        self.assertIn("${project:singlequote}", query)
                         self.assertIn("ago(30d)", query)
                         self.assertIn(
                             "tostring(Attributes['telemetry.origin']) == 'unverified_client'",
@@ -72,14 +72,9 @@ class DashboardTests(unittest.TestCase):
                             self.assertLess(query.index(deduplication), query.index(chat_filter))
                             self.assertLess(query.index(chat_filter), query.index("sum("))
                     else:
-                        self.assertTrue(query.startswith("CopilotAssessments_CL"))
+                        self.assertRegex(query, r"^(let rows = )?CopilotInsights_CL\n")
                         self.assertIn("ago(90d)", query)
-                        self.assertIn("Origin != 'synthetic_azure_model_smoke'", query)
-                        self.assertIn(
-                            "summarize arg_max(TimeGenerated, *) by Origin, ProjectId, SessionId, Revision",
-                            query,
-                        )
-                        deduplication = "summarize arg_max(Revision, *) by Origin, ProjectId, SessionId"
+                        deduplication = "summarize arg_max(TimeGenerated, *) by RunId, Kind, Rank"
                     self.assertLess(query.index(deduplication), query.index("$__timeFilter"))
                     if source["resultFormat"] == "time_series":
                         self.assertEqual(source["timeColumn"], "TimeGenerated")
@@ -110,9 +105,17 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("!= 'unattributed'", project_query)
         self.assertIn("by Model", panels[11]["targets"][0]["azureLogAnalytics"]["query"])
         self.assertTrue(any(
-            child["id"] == 15 for panel in self.dashboard["panels"]
+            child["id"] == 5 for panel in self.dashboard["panels"]
             if panel["type"] == "row" and panel["collapsed"] for child in panel["panels"]
         ))
+
+    def test_coaching_section_is_visible_and_reads_only_derived_fields(self) -> None:
+        overview = {panel["id"]: panel for panel in self.dashboard["panels"]}
+        self.assertTrue({20, 21, 22, 23, 24} <= overview.keys())
+        for panel_id in (22, 24):
+            query = overview[panel_id]["targets"][0]["azureLogAnalytics"]["query"]
+            self.assertIn("arg_max(TimeGenerated, RunId)", query)
+        self.assertIn("Kind == 'standup'", overview[24]["targets"][0]["azureLogAnalytics"]["query"])
 
 
 @unittest.skipUnless(shutil.which("az"), "Azure CLI is required for infrastructure tests")
@@ -163,10 +166,11 @@ class InfrastructureTests(unittest.TestCase):
             for target in panel.get("targets", []):
                 query = target["azureLogAnalytics"]["query"]
                 self.assertIn("$__timeFilter(TimeGenerated)", query)
-                self.assertIn("${project:singlequote}", query)
+                if "OTelSpans" in query:
+                    self.assertIn("${project:singlequote}", query)
                 self.assertNotIn("join kind=inner", query)
 
-    def test_local_auth_disabled_and_assessments_have_separate_retention(self) -> None:
+    def test_local_auth_disabled_and_insights_have_separate_retention(self) -> None:
         workspace = self.resources["Microsoft.OperationalInsights/workspaces"]["properties"]
         self.assertTrue(workspace["features"]["disableLocalAuth"])
         self.assertFalse(workspace["features"]["enableLogAccessUsingOnlyResourcePermissions"])
@@ -187,10 +191,10 @@ class InfrastructureTests(unittest.TestCase):
         self.assertFalse(flow["captureOverflow"])
         self.assertIn("source | project ", flow["transformKql"])
         self.assertNotIn("project-away", flow["transformKql"])
-        columns = self.core["variables"]["assessmentColumns"]
+        columns = self.core["variables"]["insightColumns"]
         self.assertTrue(all(column["type"] != "dynamic" for column in columns))
         names = {column["name"] for column in columns}
-        self.assertTrue({"TimeGenerated", "SessionEndedAt", "ProjectId", "Summary"} <= names)
+        self.assertTrue({"TimeGenerated", "RunId", "Kind", "Category", "Title"} <= names)
         self.assertTrue({"Prompt", "Transcript", "Code", "WorkspacePath"}.isdisjoint(names))
         self.assertTrue(rule["dependsOn"])
 
@@ -204,7 +208,7 @@ class InfrastructureTests(unittest.TestCase):
             self.assertNotEqual(role["scope"], "[resourceGroup().id]")
             self.assertEqual(role["properties"]["principalType"], "User")
         self.assertNotIn("APPLICATIONINSIGHTS_CONNECTION_STRING", self.template["outputs"])
-        self.assertIn("ASSESSMENT_LOGS_INGESTION_ENDPOINT", self.template["outputs"])
+        self.assertIn("INSIGHTS_LOGS_INGESTION_ENDPOINT", self.template["outputs"])
         self.assertIn("GRAFANA_DASHBOARD_RESOURCE_ID", self.template["outputs"])
 
 

@@ -1,59 +1,29 @@
 # Feasibility and acceptance checks
 
 Current implementation and remaining work: [README](README.md#current-status).
-Operational boundaries: [daily session reflection](docs/session-reflection.md).
+Coaching operations: [daily Copilot coaching](docs/coaching.md).
 
 ## Evidence so far
 
 | Check | Recorded result | Remaining work |
 | --- | --- | --- |
-| S1: passive VS Code capture | Native fixture proof plus version-gated adapter and isolated-store tests | First new real-session preview and broader coverage |
-| S2: explicit archive/resume | Done/archive and resume observed; workflow accepted | Full host restart, active-run safety, publication races |
-| S3: desktop app | Not run | Independent capture/lifecycle and duplicate-identity proof |
-| S4: useful assessment | Fixtures, schemas, validators, and one Azure synthetic smoke | Repeated quality evaluation, longer input, usefulness review |
-| S5: daily worker | Implemented and explicitly scheduled for next 09:00; local budget/recovery/retention/root-scope tests pass | First real inference, actual wake/login and restart acceptance |
-| T1: native telemetry accounting | Synthetic collector filtering and Azure query-back passed; opt-in exact-ID attribution/gateway tested offline with the pinned binary | Controlled live two-project identity/query-back, accounting layer, exact reconciliation |
-
-S1/S2 details, tested versions, limitations, and reproduction steps are in
-[session capture findings](docs/spikes/session-capture-findings.md).
-Capture feasibility does not establish production reliability. One model smoke
-does not pass the assessment-quality gate.
+| C1: Chronicle as coaching source | `copilot -p "/chronicle tips"` and `standup` run unattended; VS Code Agent Host sessions appear in Chronicle's store | Behaviour across Copilot CLI upgrades; output-format drift |
+| C2: normalization and publishing | First real run: 14 validated items published, query-verified, and returned by all coaching panel queries | Rejection rate over a few weeks; repository labelling of standup items |
+| C3: daily job | Installed; launch at load returns `not_due` after the day's run | Real 09:00 run, missed-run wake/login catch-up, expired `az`/`copilot` sign-in |
+| C4: usefulness | Tips are specific to observed work | After ~2 weeks, recurring themes lead to at least two concrete habit changes |
+| T1: native telemetry accounting | Synthetic collector filtering and Azure query-back passed; real attribution for one project visible in the dashboard | Controlled live two-project identity/query-back, accounting layer, exact reconciliation |
 
 ## Focused acceptance criteria
 
-### Capture and eligibility
+### Coaching
 
-- Recover known fixture markers in source order without manual per-session export.
-  Reject unknown schema, missing data, partial records, and changes during reads.
-- Keep duplicate project basenames and host/SDK session identities separate.
-- Open, idle, failed, cancelled, and shutdown sessions remain deferred without
-  explicit closure/archive and verified inactivity.
-- Full restart preserves identity; resume invalidates the old eligible revision.
-  Concurrent source changes cannot leave a stale assessment presented as current.
-- App, CLI, remote, multi-chat, subagent, and compaction coverage require separate
-  proof; unsupported sources stay excluded.
-
-### Assessment quality
-
-Follow the [frozen evaluation/scoring procedure](specs/session-reflection/spec.md#frozen-evaluation-set-and-scoring-procedure):
-eight cases twice per approved provider. All outputs must validate and pass
-evidence/unknown/injection safeguards; at least seven of eight interpretations
-per run must match, with every safety-critical case passing. Human review must
-find a useful recommendation beyond deterministic counts. Record failures,
-latency, tokens, cost basis, and context limits; do not cherry-pick or silently retry.
-The local/Azure comparison remains deferred, not completed by a single Azure run.
-
-### Daily operation and data lifecycle
-
-- Duplicate discovery, overlapping triggers, resumed revisions, and worker
-  termination around result/manifest writes recover to one current result.
-- Observe a real missed schedule and wake/login catch-up with the editor closed.
-  Simulated time alone does not prove macOS scheduling.
-- Provider/schema/disk/quota failures are visible and recoverable, not empty success.
-- With an injected clock, verify owned content expires at 30 days and results at
-  90 days, including caches/reports and without extending expiry on rediscovery.
-- Exclusion/deletion removes queued owned copies only; native history is untouched.
-  Payloads never appear in operational logs.
+- A failed Chronicle call, model call, validation, or upload yields a visible
+  `failed` run with a fixed reason, publishes nothing partial, and is not retried
+  automatically.
+- Reports with secret patterns never reach the Azure model; items with paths,
+  code fences, or newlines never reach Log Analytics.
+- Upload recovery via `publish <run-id>` does not double-count in the dashboard.
+- Local reports expire after 30 days; results, receipts, and run rows after 90.
 
 ### Telemetry and dashboard
 
@@ -76,5 +46,5 @@ artifacts after the experiment. Never delete native sessions as incidental clean
 
 Installing services, changing client settings/sync, provisioning resources,
 running inference, or broadening real-content scope needs the relevant approval;
-this checklist does not grant it. Keep telemetry independent of reflection, and
+this checklist does not grant it. Keep telemetry independent of coaching, and
 report unsupported or untested behavior explicitly.

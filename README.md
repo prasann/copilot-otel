@@ -1,131 +1,55 @@
-# Copilot reflection and observability
+# Copilot telemetry and coaching
 
-Metadata-only Copilot telemetry and evidence-backed session assessments in one
-authenticated Azure Monitor dashboard with Grafana. Native macOS collector,
-Python tools, and `azd`/Bicep infrastructure. No Docker or dedicated Grafana server.
+Metadata-only Copilot telemetry and daily Copilot coaching in one authenticated
+Azure Monitor dashboard with Grafana. Native macOS collector, Python tools, and
+`azd`/Bicep infrastructure. No Docker or dedicated Grafana server.
 
 ## Current status
 
-**Working pilot; broader live acceptance is incomplete.** Real-session project
-attribution has been queried back from Azure and confirmed visible in the
-dashboard for `personal/copilot-otel`. Offline regression tests remain in place;
-synthetic uploads are manual troubleshooting diagnostics, not routine activity
-or evidence of real-session assessment quality or current service health.
+**Working pilot.** Two independent paths feed the same dashboard:
 
-| Area | Implemented / recorded evidence | Still pending |
-| --- | --- | --- |
-| Session reflection | Read-only native capture, bounded worker, retention, daily scheduling, reviewed-summary publisher | First eligible real capture, assessment, and published-summary query-back |
-| Metadata telemetry | Real-session chat/tool spans attributed to `personal/copilot-otel` and queried back from Azure; offline binary tests pass | Controlled second-project attribution/query-back; usage accounting |
-| Azure dashboard | Project attribution user-confirmed visible; usage-first token layout deployed with query/read-back verification | Verify new layout rendering and project/time filter interaction |
-| Assessment quality | Rubric, schemas, separate evaluation fixtures, one bounded Azure synthetic model call | Repeated scored evaluation, longer inputs, local/Azure comparison |
+| Path | What it does | Verified | Still pending |
+| --- | --- | --- | --- |
+| Telemetry | VS Code Insiders OTLP metadata → local filtering collector → Azure; optional exact-ID project attribution | Real-session spans attributed to `personal/copilot-otel` and visible in the dashboard | Second-project attribution; usage reconciliation; gateway restart after reboot |
+| Coaching | Daily Copilot CLI `/chronicle tips` + `/chronicle standup` → Azure model normalizes the reports → `CopilotInsights_CL` | First run on 24 November 2026: 14 items published, query-verified, and returned by every coaching panel query | First scheduled 09:00 run and wake/login catch-up; trend usefulness over a few weeks |
 
-The last recorded pilot setup on **23 November 2026** enabled reflection for new
-archived sessions under the approved projects root, including future projects,
-and installed **Copilot Daily Session Review**. Its first run was scheduled for
-**24 November at 09:00 local**; no real-session model request had been made.
-Insiders metadata export was also configured globally; real-span arrival and
-single-project attribution were verified later that day. These are recorded
-results, not a live health report.
-New installations keep inference and scheduling disabled until explicitly enabled.
+Telemetry does not trigger coaching and coaching does not read telemetry.
 
-Azure deployment, including the last recorded dashboard refresh, was confirmed complete
-on **23 November 2026**. Live acceptance checks below remain separate.
-
-Later on **23 November**, the attribution gateway was started in the background
-for `personal/copilot-otel` only, and the Insiders endpoint was saved as
-`http://127.0.0.1:4319`. Content and identity capture remain off. After a full
-Insiders restart, real-session attributed delivery and dashboard visibility
-were confirmed for this project.
-The gateway does not restart automatically after logout/reboot.
-
-The dashboard attribution diagnostics were updated separately and read-back/query
-verified. The full `azd provision --preview` also proposed Application Insights
-property changes, so that full plan was **not applied**. Only the dashboard
-definition changed, preserving its portal identity and title.
-
-### Completed implementation and recorded setup
-
-- [x] Implement native capture, bounded reflection, retention, and reviewed-summary
-  publishing; enable the pilot policy and install the daily job.
-- [x] Implement native metadata filtering and disk queueing; verify synthetic
-  privacy filtering and Azure query-back.
-- [x] Implement opt-in exact host/SDK session attribution and bounded OTLP gateway;
-  cover resolution, failure handling, and privacy with offline tests.
-- [x] Start the pilot gateway for `personal/copilot-otel` and save the Insiders
-  endpoint, without enabling content or identity capture.
-- [x] Deploy dashboard attribution diagnostics and verify definition read-back
-  and query execution.
-- [x] Query back real-session attribution for `personal/copilot-otel` and confirm
-  it is visible in the deployed dashboard.
-- [x] Deploy observed chat-token cards, trend, and project/model breakdowns;
-  verify live queries and read-only arithmetic/filter fixtures.
-
-These are recorded milestones, not acceptance of every supported scenario.
-
-### Pending acceptance
-
-- [ ] Inspect a new archived session's metadata-only preview, review its first
-  local assessment, then publish and query back a human-reviewed derived summary.
-- [ ] Verify capture identity and eligibility after a full editor/host restart,
-  including cancellation, resume, and publication timing.
-- [ ] Observe a real 09:00 run, sleep/wake or login catch-up, and worker recovery.
-- [ ] Repeat real-span attribution/query-back with a second explicitly approved
-  project, verifying exact identities, aliases, and absence of workspace paths.
-- [ ] Check the new token layout's rendering and project/time filter interaction.
-- [ ] Reconcile concurrent projects, subagent overlap, replay, and delivery loss
-  against known totals before claiming complete usage, billing, or delivery/error rates.
-- [ ] Test queue crash/replay, offline recovery, permanent rejection, expired
-  Azure CLI authentication, and saturation.
-- [ ] Test a separate least-privilege reader and an unauthorized identity.
-- [ ] Complete the [assessment-quality evaluation](specs/session-reflection/spec.md#frozen-evaluation-set-and-scoring-procedure)
-  and longer-input tests. One synthetic result overstated evidence of a parser
-  fix; successful validation is not quality certification.
-- [ ] Validate other clients, multi-chat/subagent/compacted histories, remote
-  sessions, and multi-machine coverage before expanding support.
-
-See [feasibility and acceptance checks](SPIKES.md) for detailed criteria and
-[capture findings](docs/spikes/session-capture-findings.md) for the tested source
-contract. Usage totals and broader rollout remain deferred, not completed.
-
-## Architecture today
+## Architecture
 
 ```mermaid
 flowchart LR
   subgraph Mac["Mac"]
     Client["VS Code Insiders<br/>content + identity capture OFF"]
-    Filter["Native OTel Collector<br/>direct :4318 / attributed :4320<br/>metadata allowlist"]
-    Gateway["Opt-in attribution gateway<br/>loopback :4319<br/>exact approved session identities"]
-    Catalog["Read-only native catalog<br/>host / SDK ID mapping"]
-    Queue[("Disk queue<br/>128 requests / 64 MiB")]
-    History["New archived sessions<br/>explicit project allowlist"]
-    Capture["Read-only capture<br/>version + activity checks"]
-    Assess["Daily assessment worker<br/>explicit activation"]
-    Review["Local validation<br/>human-reviewed summary"]
-    Client -->|Direct OTLP HTTP| Filter --> Queue
-    Client -->|Opt-in OTLP HTTP/JSON| Gateway --> Filter
-    Catalog -.->|Metadata lookup only| Gateway
-    History --> Capture --> Assess --> Review
+    Gateway["Opt-in attribution gateway<br/>loopback :4319"]
+    Filter["Native OTel Collector<br/>metadata allowlist + disk queue"]
+    Chronicle["Copilot CLI /chronicle<br/>tips + standup (09:00 daily)"]
+    Coach["Coaching worker<br/>validates derived items"]
+    Client -->|OTLP| Filter
+    Client -->|opt-in OTLP| Gateway --> Filter
+    Chronicle -->|short reports| Coach
   end
+  Model["Azure OpenAI deployment<br/>reports only, store=false"]
   subgraph Azure["Azure Monitor - Entra / RBAC"]
-    OTLP["Native OTLP endpoint + rule<br/>Application Insights reference"]
-    DCR["Assessment ingestion rule"]
-    Logs[("Log Analytics<br/>OTelSpans: 30 days<br/>CopilotAssessments_CL: 90 days")]
-    Dashboard["Portal dashboard with Grafana<br/>shared project + time filters"]
+    OTLP["Native OTLP endpoint + rule"]
+    DCR["Insights ingestion rule"]
+    Logs[("Log Analytics<br/>OTelSpans: 30 days<br/>CopilotInsights_CL: 90 days")]
+    Dashboard["Dashboard with Grafana<br/>tokens + coaching"]
     OTLP --> Logs
     DCR --> Logs --> Dashboard
   end
-  Queue -->|"HTTPS / Azure CLI identity"| OTLP
-  Review -->|"allowlisted derived fields only"| DCR
+  Filter -->|HTTPS / Azure CLI identity| OTLP
+  Coach <-->|normalize| Model
+  Coach -->|theme, title, detail, repository| DCR
 ```
 
-These are **independent paths**: telemetry does not trigger assessment. The
-collector discards client logs and aggregate metrics, and strips content before
-queueing traces. The optional gateway adds only approved project aliases and
-fixed attribution diagnostics; direct or unresolved spans remain `unattributed`.
-Its metadata policy is separate from reflection approval and triggers no inference.
-The real-session worker reads only new, allowlisted archived sessions; inference
-and scheduling require explicit activation. Model inference uses a separately configured existing Azure
-deployment; Bicep does not create or manage it.
+**What crosses each boundary.** Chronicle analyses your Copilot session history
+inside Copilot's own service, which already holds those sessions (VS Code Agent
+Host sessions are included because they run on the Copilot CLI runtime). Only
+Chronicle's short reports (about 1-2 KB each) go to your Azure model. Only
+validated items are published: a fixed theme or standup status, a one-line
+title, a short detail, and an optional `owner/repo`. Items containing local paths,
+code fences, newlines, or secret patterns fail the whole run before upload.
 
 ## Try it locally
 
@@ -137,15 +61,10 @@ python3 -m venv .venv
 .venv/bin/python -m unittest discover -s tests
 ```
 
-Tests use authored fixtures and isolated native stores. They do not read real
-history, call models, upload data, or install services.
-Keep these synthetic fixtures as regression coverage. Normal operation uses
-real sessions; do not generate routine synthetic uploads. Optional live checks
-belong in [troubleshooting](docs/troubleshooting.md#manual-synthetic-diagnostics).
-
-Infrastructure tests compile Bicep if Azure CLI is present; its Bicep compiler
-must also be installed. Native-binary privacy and attribution tests run only if the pinned
-collector is already installed. Neither test installs these tools for you.
+Tests use fixtures and mocks. They do not read real history, call models, upload
+data, or install services. Infrastructure tests compile Bicep if Azure CLI and
+its Bicep compiler are present. Native-binary privacy and attribution tests run
+only if the pinned collector is already installed.
 
 ## Deploy Azure
 
@@ -162,7 +81,7 @@ azd provision
 ```
 
 Use `azd env select` for an existing environment. Bicep creates Log Analytics,
-Entra-only Application Insights, separate trace/assessment ingestion rules, a
+Entra-only Application Insights, separate trace/coaching ingestion rules, a
 trace collection endpoint, scoped user roles, and the dashboard definition.
 Endpoints use public TLS with RBAC, not private networking. Ingestion and storage
 can incur charges.
@@ -270,8 +189,7 @@ paths; JSON values do not expand `~` or environment variables):
 
 Only exact, explicitly approved project workspaces are eligible. Duplicate
 folder names are supported; overlapping project roots and `synthetic/demo` are
-rejected. Attribution policy is independent of reflection/content-analysis
-approval and enables no model calls. Existing native sessions can identify
+rejected. Attribution policy is independent of coaching and enables no model calls. Existing native sessions can identify
 **new incoming spans**; no old telemetry or conversation history is replayed.
 
 After reviewing that scope, opt in explicitly:
@@ -332,100 +250,73 @@ stop the gateway with Ctrl-C, then stop/reinstall the collector without
 
 ```text
 Input tokens | Output tokens | Cache-read tokens | Last observed span
--------------+---------------+-------------------+-------------------
 Observed tokens over time
-----------------------------------------------------------------------
-Observed tokens by project
-Observed tokens by model
-  > Inspect data: reviewed assessments, freshness and individual spans
-      ProjectId | Attribution | AttributionReason | span metadata
+Observed tokens by project | Observed tokens by model
+Copilot coaching
+  Most repeated tip theme | Latest tips
+  Tip themes over time    | Latest standup
+  > Inspect data: individual spans with attribution diagnostics
   > Pilot notes: privacy, accounting, and analysis scope
 ```
 
 Open **Azure Monitor > Dashboards with Grafana** in the portal. The
 [definition](dashboards/copilot-pilot.json) is deployed by Bicep, not imported
 manually. Queries use the signed-in reader's permissions. Project accepts `*`
-or an exact project ID; refresh is five minutes.
+or an exact project ID and applies to telemetry panels only; refresh is five minutes.
 
 - Token cards, trend, and project/model tables sum reported usage from
-  deduplicated `chat` spans only. Agent and tool spans are excluded to avoid
-  overlapping totals. These are **observed tokens, not billing or guaranteed
-  complete usage**; transport loss and subagent overlap remain unverified.
-- Cache-read tokens are shown separately, never added to input tokens. Missing
-  reporting is not treated as zero: totals with no reported values stay empty,
-  while `MissingUsage` and `MissingCache` expose incomplete chat-span reporting.
-- Direct native spans remain `unattributed`; the opt-in gateway can label exact,
-  approved session identities. Accounting remains unverified. Project filters
-  cannot reconstruct missing identity or relabel historical rows.
-- Expand **Inspect data** to see `Attribution` and `AttributionReason` on individual
-  spans. Gateway-resolved spans use `attributed` / `resolved`; unresolved gateway
-  spans report a fixed reason. Direct spans do not have gateway reason diagnostics.
-- Queries deduplicate replayed spans and assessment revisions before time filtering.
-  Lookbacks are capped at 30 days for spans and 90 days for assessments.
-- Synthetic smoke records are excluded. Real assessments appear only after
-  explicit reviewed-summary publishing; no data is not a health signal.
-- Assessment summaries and freshness are collapsed under **Inspect data**.
-  An empty assessment panel is expected until a real reviewed summary is published.
-- Leave existing synthetic records to expire under Azure retention (30 days for
-  spans, 90 days for assessments); routine cleanup does not require purging them.
-- Published assessments describe historical archived revisions, not live archive
-  state. Later resumes are tracked locally, not synchronized back to Azure.
+  deduplicated `chat` spans only. These are **observed tokens, not billing or
+  guaranteed complete usage**; transport loss and subagent overlap remain unverified.
+- Cache-read tokens are shown separately. Missing reporting is not treated as
+  zero; `MissingUsage` and `MissingCache` expose incomplete chat-span reporting.
+- Direct native spans remain `unattributed`; the opt-in gateway labels exact,
+  approved session identities. Expand **Inspect data** for per-span diagnostics.
+- Coaching panels cover all projects. **Latest tips** and **Latest standup** show
+  the most recent run in the selected range; **Tip themes over time** shows
+  which habits keep recurring. Themes: `verification`, `planning`,
+  `context_and_resume`, `prompt_clarity`, `feature_usage`, `documentation`,
+  `cost_efficiency`, `privacy`, `other`.
+- Queries deduplicate replayed spans and resent coaching rows before time
+  filtering. Lookbacks are capped at 30 days for spans and 90 days for coaching.
+- The retired `CopilotAssessments_CL` table was deleted from the pilot workspace
+  on 24 November 2026; delete it manually in other older workspaces.
 
-## Daily session reflection
+## Daily Copilot coaching
 
-The worker reads only new, explicitly archived, inactive sessions from the tested
-local VS Code Agent Host default-chat source. Results stay local until reviewed
-and explicitly published. Initialize a new installation's policy once:
+Requires Copilot CLI (`copilot`) signed in, Azure CLI signed in, a provisioned
+environment, and the Azure model settings in `.env` (see `.env.example`).
 
 ```bash
-.venv/bin/python -m tools.session_reflection init \
-  --project personal/copilot-otel=/absolute/path/to/copilot-otel
-.venv/bin/python -m tools.session_reflection preview
-.venv/bin/python -m tools.session_reflection status
+.venv/bin/python -m tools.coaching enable --execute     # checks .env, azd outputs, copilot
+.venv/bin/python -m tools.coaching run --execute        # one run now (once per local day)
+.venv/bin/python -m tools.coaching verify <run-id>      # confirm rows reached Log Analytics
+.venv/bin/python -m tools.coaching install --execute    # 09:00 daily job + hourly catch-up
+.venv/bin/python -m tools.coaching status
 ```
 
-Initialization fixes a no-backfill cutoff. Only sessions created afterward under
-the explicit project roots can be captured. To explicitly approve an entire
-projects tree in one step, including future projects:
-
-```bash
-.venv/bin/python -m tools.session_reflection configure-root \
-  --projects-root /absolute/path/to/projects --execute
-```
-
-Root expansion gets its own fresh cutoff without resetting earlier approvals or
-the budget. Preview prints IDs, counts, and eligibility reasons, **not conversation
-text**, and makes no model calls.
-
-All approved projects share **5 attempts per local day**, **20,000 characters for
-the entire request**, and **2,000 output tokens per request**. Oversized or
-uncertain sessions are deferred; failed or interrupted attempts are not
-automatically retried. Owned snapshots expire after 30 days, results/receipts
-after 90 days; reflection state is capped at 64 MiB. Native history is untouched.
-These limits are not a monetary cap.
-
-Follow [the operating guide](docs/session-reflection.md) for content scope,
-explicit activation, the optional 09:00 local job, reviewed publishing, and
-stop/uninstall commands. Installing the code alone enables neither inference nor
-the job. Scheduling does not wake the Mac or automatically upload results.
+Each run calls Chronicle twice (capped at 30 Copilot AI credits each; about
+10 credits in practice) and the Azure model once. See the
+[operating guide](docs/coaching.md) for limits, retention, recovery, and removal.
 
 ## Repository map
 
 | Location | Responsibility |
 | --- | --- |
-| [tools/](tools/) | Native capture, daily reflection, shared assessment validation, optional smoke tools, collector lifecycle |
+| [tools/coaching.py](tools/coaching.py) | Daily Chronicle → Azure model → dashboard coaching worker |
+| [tools/native_collector.py](tools/native_collector.py) | Collector install, lifecycle, and synthetic delivery checks |
 | [tools/attribution.py](tools/attribution.py) | Opt-in metadata-only project resolver and foreground OTLP gateway |
+| [tools/native_sessions.py](tools/native_sessions.py) | Read-only VS Code session catalog lookups used by attribution |
+| [tools/azure_cli.py](tools/azure_cli.py) | Shared Azure CLI REST, `.env`, and `azd` helpers |
 | [collector/native-config.json](collector/native-config.json) | Trace privacy filter, authentication, durable queue |
 | [infra/](infra/) | Azure resources and scoped RBAC |
 | [dashboards/copilot-pilot.json](dashboards/copilot-pilot.json) | Single current dashboard |
-| [tests/](tests/) | Assessment, attribution, collector, dashboard, and Bicep checks |
-| [specs/session-reflection/](specs/session-reflection/) | Rubric, schemas, fixtures, and assessment evaluation contract |
-| [docs/](docs/) | Azure setup, reflection operations, and capture findings |
-| [SPIKES.md](SPIKES.md) | Recorded feasibility evidence and detailed acceptance criteria |
+| [tests/](tests/) | Coaching, attribution, collector, dashboard, and Bicep checks |
+| [docs/](docs/) | Azure setup, coaching operations, troubleshooting |
+| [SPIKES.md](SPIKES.md) | Acceptance criteria still to prove |
 
-Older Docker/content-capture and branch-mapping experiments have been removed;
-Git history retains them. Removing files does not remove older Azure resources.
-Review those separately, and never run `azd down` on shared infrastructure or
-an environment containing a shared model.
+The earlier per-session assessment pipeline (native transcript capture, rubric,
+schemas, evaluation fixtures) was replaced by Chronicle; Git history retains it.
+Removing files does not remove older Azure resources. Never run `azd down` on
+shared infrastructure or an environment containing a shared model.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [LICENSE](LICENSE).

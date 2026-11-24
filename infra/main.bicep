@@ -11,7 +11,7 @@ param location string
 
 @minLength(36)
 @maxLength(36)
-@description('Object ID of the signed-in azd user who will query data and publish assessments.')
+@description('Object ID of the signed-in azd user who will query data and publish coaching insights.')
 param principalId string
 
 var tags = {
@@ -24,7 +24,7 @@ var abbrs = {
   logAnalytics: 'log'
   appInsights: 'appi'
   dashboard: 'dash'
-  assessmentRule: 'dcr'
+  rule: 'dcr'
 }
 
 var rgName = '${abbrs.resourceGroup}-${environmentName}'
@@ -46,7 +46,7 @@ module core 'core.bicep' = {
     logAnalyticsName: '${abbrs.logAnalytics}-${resourceToken}'
     appInsightsName: '${abbrs.appInsights}-${resourceToken}'
     dashboardName: '${abbrs.dashboard}-${resourceToken}'
-    assessmentRuleName: '${abbrs.assessmentRule}-${resourceToken}'
+    ruleName: '${abbrs.rule}-${resourceToken}'
   }
 }
 
@@ -57,10 +57,10 @@ output APPLICATIONINSIGHTS_RESOURCE_ID string = core.outputs.appInsightsId
 output LOG_ANALYTICS_WORKSPACE_ID string = core.outputs.logAnalyticsId
 output LOG_ANALYTICS_WORKSPACE_CUSTOMER_ID string = core.outputs.logAnalyticsCustomerId
 output GRAFANA_DASHBOARD_RESOURCE_ID string = core.outputs.dashboardId
-output ASSESSMENT_DCR_RESOURCE_ID string = core.outputs.assessmentRuleId
-output ASSESSMENT_DCR_IMMUTABLE_ID string = core.outputs.assessmentRuleImmutableId
-output ASSESSMENT_LOGS_INGESTION_ENDPOINT string = core.outputs.assessmentIngestionEndpoint
-output ASSESSMENT_STREAM_NAME string = core.outputs.assessmentStream
-output ASSESSMENT_TABLE_NAME string = core.outputs.assessmentTableName
+output INSIGHTS_DCR_RESOURCE_ID string = core.outputs.insightRuleId
+output INSIGHTS_DCR_IMMUTABLE_ID string = core.outputs.insightRuleImmutableId
+output INSIGHTS_LOGS_INGESTION_ENDPOINT string = core.outputs.insightIngestionEndpoint
+output INSIGHTS_STREAM_NAME string = core.outputs.insightStream
+output INSIGHTS_TABLE_NAME string = core.outputs.insightTableName
 output TELEMETRY_TRACES_ENDPOINT string = core.outputs.telemetryTracesEndpoint
 output TELEMETRY_DCR_RESOURCE_ID string = core.outputs.telemetryRuleId

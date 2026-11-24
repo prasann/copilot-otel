@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from tools.azure_pilot import ROOT, azd_value, rest
+from tools.azure_cli import ROOT, azd_value, rest
 from tools.attribution import COLLECTOR_PORT, Policy, REASONS
 
 

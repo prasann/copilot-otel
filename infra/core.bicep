@@ -10,7 +10,7 @@ param principalId string
 param logAnalyticsName string
 param appInsightsName string
 param dashboardName string
-param assessmentRuleName string
+param ruleName string
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -63,26 +63,23 @@ resource dashboardDefinition 'Microsoft.Dashboard/dashboards/dashboardDefinition
   }
 }
 
-var assessmentColumns = [
+var insightColumns = [
   { name: 'TimeGenerated', type: 'datetime' }
-  { name: 'SessionEndedAt', type: 'datetime' }
   { name: 'SchemaVersion', type: 'int' }
-  { name: 'AssessmentId', type: 'string' }
-  { name: 'SessionId', type: 'string' }
-  { name: 'Revision', type: 'int' }
-  { name: 'SnapshotSha256', type: 'string' }
-  { name: 'ProjectId', type: 'string' }
-  { name: 'ProjectName', type: 'string' }
-  { name: 'ProjectCategory', type: 'string' }
-  { name: 'Origin', type: 'string' }
-  { name: 'Outcome', type: 'string' }
-  { name: 'Summary', type: 'string' }
-  { name: 'Limitations', type: 'string' }
+  { name: 'RunId', type: 'string' }
+  { name: 'Kind', type: 'string' }
+  { name: 'Rank', type: 'int' }
+  { name: 'Category', type: 'string' }
+  { name: 'Title', type: 'string' }
+  { name: 'Detail', type: 'string' }
+  { name: 'Repository', type: 'string' }
+  { name: 'Source', type: 'string' }
+  { name: 'ModelId', type: 'string' }
 ]
-var tableName = 'CopilotAssessments_CL'
-var inputStream = 'Custom-CopilotAssessmentInput'
+var tableName = 'CopilotInsights_CL'
+var inputStream = 'Custom-CopilotInsightInput'
 
-resource assessments 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01' = {
+resource insights 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01' = {
   parent: logAnalytics
   name: tableName
   properties: {
@@ -91,27 +88,27 @@ resource assessments 'Microsoft.OperationalInsights/workspaces/tables@2022-10-01
     totalRetentionInDays: 90
     schema: {
       name: tableName
-      columns: assessmentColumns
+      columns: insightColumns
     }
   }
 }
 
-resource assessmentRule 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
-  name: assessmentRuleName
+resource insightRule 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
+  name: ruleName
   location: location
   tags: tags
   kind: 'Direct'
   properties: {
-    description: 'Derived assessments only. Publisher must validate content before sending.'
+    description: 'Derived Copilot coaching items only. Publisher validates fields before sending.'
     streamDeclarations: {
       '${inputStream}': {
-        columns: assessmentColumns
+        columns: insightColumns
       }
     }
     destinations: {
       logAnalytics: [
         {
-          name: 'assessments'
+          name: 'insights'
           workspaceResourceId: logAnalytics.id
         }
       ]
@@ -119,19 +116,19 @@ resource assessmentRule 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
     dataFlows: [
       {
         streams: [inputStream]
-        destinations: ['assessments']
+        destinations: ['insights']
         outputStream: 'Custom-${tableName}'
-        transformKql: 'source | project ${join(map(assessmentColumns, column => column.name), ', ')}'
+        transformKql: 'source | project ${join(map(insightColumns, column => column.name), ', ')}'
         captureOverflow: false
       }
     ]
   }
-  dependsOn: [assessments]
+  dependsOn: [insights]
 }
 
-resource assessmentPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(assessmentRule.id, principalId, 'Monitoring Metrics Publisher')
-  scope: assessmentRule
+resource insightPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(insightRule.id, principalId, 'Monitoring Metrics Publisher')
+  scope: insightRule
   properties: {
     principalId: principalId
     principalType: 'User'
@@ -183,7 +180,7 @@ resource appInsightsReader 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 
 // Native OTLP HTTP acknowledges ingestion; avoid the legacy fire-and-forget exporter.
 resource telemetryEndpoint 'Microsoft.Insights/dataCollectionEndpoints@2024-03-11' = {
-  name: '${assessmentRuleName}-otlp'
+  name: '${ruleName}-otlp'
   location: location
   tags: tags
   properties: {
@@ -200,7 +197,7 @@ var traceStreams = [
 ]
 
 resource telemetryRule 'Microsoft.Insights/dataCollectionRules@2024-03-11' = {
-  name: '${assessmentRuleName}-otlp'
+  name: '${ruleName}-otlp'
   location: location
   tags: tags
   properties: {
@@ -271,10 +268,10 @@ output logAnalyticsCustomerId string = logAnalytics.properties.customerId
 output appInsightsName string = appInsights.name
 output appInsightsId string = appInsights.id
 output dashboardId string = dashboard.id
-output assessmentRuleId string = assessmentRule.id
-output assessmentRuleImmutableId string = assessmentRule.properties.immutableId
-output assessmentIngestionEndpoint string = assessmentRule.properties.endpoints.logsIngestion
-output assessmentStream string = inputStream
-output assessmentTableName string = tableName
+output insightRuleId string = insightRule.id
+output insightRuleImmutableId string = insightRule.properties.immutableId
+output insightIngestionEndpoint string = insightRule.properties.endpoints.logsIngestion
+output insightStream string = inputStream
+output insightTableName string = tableName
 output telemetryTracesEndpoint string = '${telemetryEndpoint.properties.logsIngestion.endpoint}/datacollectionRules/${telemetryRule.properties.immutableId}/streams/Microsoft-OTLP-Traces/otlp/v1/traces'
 output telemetryRuleId string = telemetryRule.id

@@ -17,13 +17,15 @@ The gateway does not restart automatically after logout/reboot. Its dashboard
 diagnostic columns were deployed separately, preserving portal identity/title,
 and definition read-back plus the updated Azure query passed. The full
 `azd provision --preview` also proposed Application Insights property changes,
-so that full plan was not applied. Two-project live acceptance remains pending.
-VS Code Insiders settings were configured globally. The [real-session worker](session-reflection.md) is
-implemented and explicitly enabled for the pilot's approved projects root. Its
-first scheduled assessment is deferred until the next 09:00 local run; live
-real-session inference has not been tested.
+so that full plan was not applied at the time. Two-project live acceptance remains pending.
+VS Code Insiders settings were configured globally.
 
-The pilot's first model request and reviewed summary upload/query-back succeeded.
+On **24 November 2026** the coaching insights table and rule replaced the earlier
+assessment table/stream. The full `what-if` showed only the intended changes plus
+default Application Insights creation properties (`Flow_Type`, `Request_Source`),
+so the full plan was applied. The first [daily coaching](coaching.md) run was
+published and query-verified, and the daily job is installed.
+
 Dashboard definitions and project/time-filtered KQL were verified through CLI.
 Earlier dashboard rendering and datasource access were user-confirmed. The latest
 attribution view was user-confirmed. The usage-first token layout was subsequently
@@ -33,7 +35,7 @@ in the [README status and pending checklist](../README.md#current-status).
 
 [azure.yaml](../azure.yaml) uses [infra/main.bicep](../infra/main.bicep) and
 [infra/core.bicep](../infra/core.bicep). They now provision Log Analytics,
-workspace-based Application Insights, an assessment table/direct ingestion rule,
+workspace-based Application Insights, a coaching insights table/direct ingestion rule,
 scoped user roles, and a portal Grafana dashboard with repo-backed initial panels.
 Native trace ingestion adds a collection endpoint and separate telemetry DCR,
 referencing the existing Application Insights/workspace. No Azure Monitor
@@ -41,8 +43,8 @@ metrics workspace is needed for this traces-only slice.
 **No dedicated Azure Managed Grafana instance or model deployment is created.**
 
 Target: repo-backed Bicep and `azd` for provisioning, Azure CLI authentication for
-local inference, and one authenticated Azure Monitor dashboard with Grafana for
-both assessments and telemetry. No Docker requirement.
+the coaching model call, and one authenticated Azure Monitor dashboard with Grafana
+for both coaching and telemetry. No Docker requirement.
 
 ## 1. Choose the pilot subscription and region
 
@@ -92,7 +94,7 @@ azd env set AZURE_LOCATION <monitoring-region>
 The template obtains `AZURE_PRINCIPAL_ID` from the signed-in `azd` user. It
 assigns that user Log Analytics Reader on the workspace, Reader on Application
 Insights and the dashboard, and Monitoring Metrics Publisher separately on the
-assessment and telemetry data collection rules. The current pilot targets an interactive user, not a
+coaching and telemetry data collection rules. The current pilot targets an interactive user, not a
 service principal/CI identity. It creates no app registrations or credentials.
 
 The local `.azure/` directory is ignored. Do not commit it or dump its contents
@@ -119,23 +121,14 @@ already exist. Fill these values locally:
 ```dotenv
 AZURE_OPENAI_ENDPOINT=<resource-inference-endpoint>
 AZURE_OPENAI_DEPLOYMENT=<deployment-name>
-ASSESSMENT_MODEL_ID=<actual-model-id>
-ASSESSMENT_MODEL_VERSION=<actual-model-version>
-ASSESSMENT_AZURE_AUTH=azure_cli
-ASSESSMENT_ALLOW_SYNTHETIC_INFERENCE=false
-ASSESSMENT_MAX_REQUESTS=16
-ASSESSMENT_MAX_OUTPUT_TOKENS=2000
+COACHING_MODEL_ID=<actual-model-id>
+COACHING_AZURE_AUTH=azure_cli
 ```
 
-Do not add an API key or store an access token. Leave inference disabled until
-the runner and endpoint compatibility checks are ready. Current offline tools
-do not load this file; filling it does not start inference.
-
-The earlier approved model test used one synthetic smoke request. Repeating it
-is optional troubleshooting, not an acceptance prerequisite. Its 16-attempt
-ledger limit remains a safety ceiling; the full eight-case/two-run evaluation is deferred.
-Input tokens and any model-specific reasoning accounting also affect cost.
-No real chat history is authorized by this setup.
+Do not add an API key or store an access token. Filling this file starts
+nothing; only `tools.coaching run` (manually or from its daily job) calls the
+model, once per day, with Chronicle's short reports as the only input. The model
+must support strict JSON-schema output on the Responses API.
 
 ## 4. Check the dashboard experience
 
@@ -177,7 +170,7 @@ Review the preview before applying:
 - Resource group: `rg-<environment-name>`; no existing/shared model is touched.
 - Workspace: 30-day default retention, shared-key access disabled.
 - Application Insights: Entra-only ingestion (`DisableLocalAuth`).
-- Assessment table `CopilotAssessments_CL`: 90 days of retention.
+- Coaching table `CopilotInsights_CL`: 90 days of retention.
 - Direct data collection rule: typed fields with explicit projection, no
   overflow capture; Monitoring Metrics Publisher scoped to this rule.
 - Native OTLP collection endpoint and telemetry DCR: traces only, same region,
@@ -204,9 +197,9 @@ azd env get-value AZURE_RESOURCE_GROUP
 azd env get-value APPLICATIONINSIGHTS_RESOURCE_ID
 azd env get-value LOG_ANALYTICS_WORKSPACE_ID
 azd env get-value GRAFANA_DASHBOARD_RESOURCE_ID
-azd env get-value ASSESSMENT_DCR_IMMUTABLE_ID
-azd env get-value ASSESSMENT_LOGS_INGESTION_ENDPOINT
-azd env get-value ASSESSMENT_STREAM_NAME
+azd env get-value INSIGHTS_DCR_IMMUTABLE_ID
+azd env get-value INSIGHTS_LOGS_INGESTION_ENDPOINT
+azd env get-value INSIGHTS_STREAM_NAME
 azd env get-value TELEMETRY_TRACES_ENDPOINT
 azd env get-value TELEMETRY_DCR_RESOURCE_ID
 ```
@@ -223,24 +216,21 @@ with both agent and direct trace source declarations; no agent is installed on
 Azure. Native tables are `OTelSpans`, `OTelEvents`, and `OTelResources`, not the
 legacy Application Insights request/dependency tables.
 
-The assessment DCR accepts only the columns declared in
-[infra/core.bicep](../infra/core.bicep): assessment/session identity, revision and
-snapshot hash, project labels, origin, outcome, summary, limitations, and two
-timestamps. `TimeGenerated` is the assessment time; `SessionEndedAt` is the
-source-session end time. This is a pilot storage contract, not approval to
-publish real session content. A projection cannot detect transcript text placed
-inside an allowed string field. The explicit synthetic publisher requires a
-manually reviewed derived summary; it does not upload model claims or transcript
-events automatically and is not approved for real histories.
+The insights DCR accepts only the columns declared in
+[infra/core.bicep](../infra/core.bicep): run ID, kind (`tip` or `standup`), rank,
+category, title, detail, repository, source, model ID, schema version, and
+`TimeGenerated` (the run time). A projection cannot detect sensitive text placed
+inside an allowed string field; the coaching worker validates items locally
+before upload (see [daily coaching](coaching.md#data-boundaries)).
 
 Open the Application Insights resource > **Dashboards with Grafana** after
 provisioning. The deployed dashboard is tagged for that gallery and includes
 observed input/output/cache-read tokens, a token trend, project/model breakdowns,
-and collapsed assessment/freshness/raw-span details. Token sums use only
+the coaching section, and collapsed raw-span details. Token sums use only
 deduplicated chat spans, not overlapping agent/tool totals, and are not billing
 or guaranteed complete usage. Synthetic
-smoke records are excluded from dashboard queries. Earlier synthetic assessment
-and span samples were deleted and query-verified absent. One service-name-only
+smoke records are excluded from dashboard queries. Earlier synthetic span
+samples were deleted and query-verified absent. One service-name-only
 resource lookup row remained after Azure rejected its ID filter and an exact
 timestamp operation matched zero rows. It contains no token counts, prompts, or
 conversation data and is not shown in the dashboard.
@@ -249,8 +239,9 @@ the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resou
 (`2025-09-01-preview`), not unsupported properties on the parent. Check browser
 rendering and datasource selection after provisioning changes. See the
 [official export/ARM guidance](https://learn.microsoft.com/azure/azure-monitor/visualize/visualize-use-grafana-dashboards#manage-a-dashboard-as-an-arm-template).
-The project field accepts `*` or an exact project ID. The time picker filters
-assessment creation time; superseded revisions and replay rows are deduplicated.
+The project field accepts `*` or an exact project ID and applies to telemetry
+panels. The time picker filters span start and coaching run time; replayed spans
+and resent coaching rows are deduplicated.
 
 The baseline uses public TLS endpoints with Entra/RBAC, not private networking.
 It grants data access only to the pilot user; existing inherited subscription/RG
@@ -264,12 +255,10 @@ review and clean up those resources separately. Only run `azd down` after
 confirming the selected environment contains exclusively disposable pilot
 resources. Never use it on an environment containing an existing/shared model.
 
-Still pending: second-project metadata verification, live real-history inference
-and summary query-back, verified usage totals, and actual scheduling/wake acceptance.
-The local retention/schedule implementation is covered by isolated tests and the
-job is installed; actual wake behavior remains untested. Cloud assessment retention is configured
-here; no native client history is deleted. Use the
-[README pending checklist](../README.md#pending-acceptance) for current progress and
+Still pending: second-project metadata verification, verified usage totals, and
+the first real 09:00 coaching run with wake/login catch-up. Cloud coaching
+retention is configured here; no native client history is deleted. Use the
+[README status](../README.md#current-status) for current progress and
 the [troubleshooting guide](troubleshooting.md) only when diagnosing a failure.
 
 ## 6. End-to-end acceptance order
@@ -279,17 +268,16 @@ the [troubleshooting guide](troubleshooting.md) only when diagnosing a failure.
    Query back exact session identities and project aliases, and verify prohibited
    content is absent. Repeat with a second approved project; synthetic records
    cannot establish real-client attribution.
-3. Separately approve real-history assessment, inspect the first eligible local
-   result, then publish and query back a human-reviewed derived summary. Review
-   quality, not just JSON validity.
-4. Verify real telemetry and published assessments in the dashboard with the
+3. Run `tools.coaching run --execute`, inspect the local report and items, then
+   `verify` the run. Review usefulness, not just JSON validity.
+4. Verify real telemetry and coaching items in the dashboard with the
    same project/time filters. Keep unattributed spans visible; do not sum
    unverified tokens. Explicitly tagged synthetic smoke rows remain excluded.
 5. Verify an authorized reader can view the data, an unauthorized identity
    cannot query it, and there is no anonymous dashboard route.
 
 Use manual synthetic diagnostics only to isolate a specific infrastructure,
-authentication, exporter, or model-endpoint failure. Do not schedule them or
+authentication, or exporter failure. Do not schedule them or
 require new synthetic uploads for routine acceptance. Leave existing synthetic
 rows to expire under configured retention instead of routinely purging them.
 
