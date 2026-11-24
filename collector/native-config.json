@@ -1,0 +1,120 @@
+{
+  "extensions": {
+    "health_check": {"endpoint": "127.0.0.1:13133"},
+    "azure_auth": {
+      "use_default": true,
+      "scopes": ["https://monitor.azure.com/.default"]
+    },
+    "file_storage": {
+      "directory": "__QUEUE_DIRECTORY__",
+      "create_directory": true,
+      "directory_permissions": "0700",
+      "fsync": true,
+      "max_size": 67108864,
+      "compaction": {"on_start": true, "on_rebound": false, "directory": "__COMPACTION_DIRECTORY__"}
+    }
+  },
+  "receivers": {
+    "otlp": {
+      "protocols": {
+        "http": {
+          "endpoint": "127.0.0.1:4318",
+          "max_request_body_size": 1048576
+        }
+      }
+    }
+  },
+  "processors": {
+    "memory_limiter": {
+      "check_interval": "1s",
+      "limit_mib": 192,
+      "spike_limit_mib": 48
+    },
+    "transform/metadata": {
+      "error_mode": "propagate",
+      "trace_statements": [
+        {
+          "context": "span",
+          "statements": [
+            "set(cache[\"origin\"], attributes[\"telemetry.origin\"])",
+            "keep_keys(resource.attributes, [])",
+            "set(resource.schema_url, \"\")",
+            "set(resource.attributes[\"service.name\"], \"copilot-otel\")",
+            "keep_keys(instrumentation_scope.attributes, [])",
+            "set(instrumentation_scope.schema_url, \"\")",
+            "set(instrumentation_scope.name, \"copilot-otel.metadata\")",
+            "set(instrumentation_scope.version, \"1\")",
+            "set(name, \"copilot.invocation\")",
+            "set(status.message, \"\")",
+            "set(trace_state, \"\")",
+            "set(events, nil)",
+            "set(links, nil)",
+            "keep_keys(attributes, [\"gen_ai.usage.input_tokens\", \"gen_ai.usage.output_tokens\", \"gen_ai.usage.cache_read.input_tokens\", \"gen_ai.response.model\", \"gen_ai.operation.name\", \"gen_ai.conversation.id\"])",
+            "delete_key(attributes, \"gen_ai.operation.name\") where not (attributes[\"gen_ai.operation.name\"] == \"chat\" or attributes[\"gen_ai.operation.name\"] == \"invoke_agent\" or attributes[\"gen_ai.operation.name\"] == \"execute_tool\")",
+            "delete_key(attributes, \"gen_ai.conversation.id\") where not IsString(attributes[\"gen_ai.conversation.id\"])",
+            "delete_key(attributes, \"gen_ai.conversation.id\") where attributes[\"gen_ai.conversation.id\"] != nil and not IsMatch(attributes[\"gen_ai.conversation.id\"], \"^([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$\")",
+            "delete_key(attributes, \"gen_ai.usage.input_tokens\") where not IsInt(attributes[\"gen_ai.usage.input_tokens\"])",
+            "delete_key(attributes, \"gen_ai.usage.output_tokens\") where not IsInt(attributes[\"gen_ai.usage.output_tokens\"])",
+            "delete_key(attributes, \"gen_ai.usage.cache_read.input_tokens\") where not IsInt(attributes[\"gen_ai.usage.cache_read.input_tokens\"])",
+            "delete_key(attributes, \"gen_ai.usage.input_tokens\") where attributes[\"gen_ai.usage.input_tokens\"] != nil and attributes[\"gen_ai.usage.input_tokens\"] < 0",
+            "delete_key(attributes, \"gen_ai.usage.output_tokens\") where attributes[\"gen_ai.usage.output_tokens\"] != nil and attributes[\"gen_ai.usage.output_tokens\"] < 0",
+            "delete_key(attributes, \"gen_ai.usage.cache_read.input_tokens\") where attributes[\"gen_ai.usage.cache_read.input_tokens\"] != nil and attributes[\"gen_ai.usage.cache_read.input_tokens\"] < 0",
+            "delete_key(attributes, \"gen_ai.response.model\") where not IsString(attributes[\"gen_ai.response.model\"])",
+            "delete_key(attributes, \"gen_ai.response.model\") where attributes[\"gen_ai.response.model\"] != nil and not IsMatch(attributes[\"gen_ai.response.model\"], \"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$\")",
+            "set(attributes[\"telemetry.origin\"], \"unverified_client\")",
+            "set(attributes[\"project.id\"], \"unattributed\")",
+            "set(attributes[\"attribution.status\"], \"unattributed\")",
+            "set(attributes[\"accounting.verified\"], false)",
+            "set(attributes[\"telemetry.origin\"], \"synthetic_collector_smoke\") where cache[\"origin\"] == \"synthetic_collector_smoke\"",
+            "set(attributes[\"project.id\"], \"synthetic/demo\") where cache[\"origin\"] == \"synthetic_collector_smoke\"",
+            "set(attributes[\"attribution.status\"], \"synthetic\") where cache[\"origin\"] == \"synthetic_collector_smoke\""
+          ]
+        }
+      ]
+    },
+    "filter/discard_non_trace": {
+      "error_mode": "propagate",
+      "metrics": {"datapoint": ["true"]},
+      "logs": {"log_record": ["true"]}
+    }
+  },
+  "exporters": {
+    "nop": {},
+    "otlp_http/azure": {
+      "traces_endpoint": "__TELEMETRY_TRACES_ENDPOINT__",
+      "auth": {"authenticator": "azure_auth"},
+      "timeout": "30s",
+      "retry_on_failure": {"enabled": true, "initial_interval": "5s", "max_interval": "60s", "max_elapsed_time": "0s"},
+      "sending_queue": {
+        "enabled": true,
+        "storage": "file_storage",
+        "num_consumers": 1,
+        "queue_size": 128
+      }
+    }
+  },
+  "service": {
+    "extensions": ["health_check", "azure_auth", "file_storage"],
+    "telemetry": {
+      "logs": {"level": "warn"},
+      "metrics": {"level": "basic"}
+    },
+    "pipelines": {
+      "traces": {
+        "receivers": ["otlp"],
+        "processors": ["memory_limiter", "transform/metadata"],
+        "exporters": ["otlp_http/azure"]
+      },
+      "metrics": {
+        "receivers": ["otlp"],
+        "processors": ["memory_limiter", "filter/discard_non_trace"],
+        "exporters": ["nop"]
+      },
+      "logs": {
+        "receivers": ["otlp"],
+        "processors": ["memory_limiter", "filter/discard_non_trace"],
+        "exporters": ["nop"]
+      }
+    }
+  }
+}

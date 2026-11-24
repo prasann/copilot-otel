@@ -22,11 +22,11 @@ body:
     validations:
       required: true
   - type: input
-    id: docker-version
+    id: python-version
     attributes:
-      label: Docker version
-      description: Run `docker version --format '{{.Client.Version}}'`
-      placeholder: "e.g. 27.0.3"
+      label: Python version
+      description: Run `.venv/bin/python --version` for local tool issues.
+      placeholder: "e.g. Python 3.11"
     validations:
       required: false
   - type: textarea
@@ -35,7 +35,7 @@ body:
       label: Steps to reproduce
       description: A numbered list of steps that reliably reproduces the issue.
       placeholder: |
-        1. Run `azd up`
+        1. Run the failing command
         2. ...
     validations:
       required: true
@@ -55,5 +55,5 @@ body:
     id: logs
     attributes:
       label: Relevant log output
-      description: Paste collector logs (`docker logs otel-collector`) or azd output here.
+      description: Paste sanitized command output or errors from `~/Library/Application Support/copilot-otel/logs/collector.stderr.log`. Do not include credentials, raw histories, or content payloads.
       render: shell

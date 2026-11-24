@@ -16,17 +16,29 @@ Before opening an issue, search the existing issues to avoid duplicates. When
 filing a bug report, include:
 
 - Operating system and version
-- `azd` version (`azd version`)
-- Docker version (`docker version`)
+- Python version (`.venv/bin/python --version`)
+- Azure CLI / `azd` versions for provisioning or authentication issues
 - Steps to reproduce
 - Expected behavior vs actual behavior
-- Relevant log output (`docker logs otel-collector`)
+- Sanitized command output or collector errors from
+  `~/Library/Application Support/copilot-otel/logs/collector.stderr.log`
+
+Do not include credentials, environment dumps, raw histories, model responses,
+or telemetry payloads containing content.
 
 ## Submitting pull requests
 
 1. Fork the repository and create a feature branch from `main`.
 2. Make your changes. Keep commits focused and atomic.
-3. Test your changes end-to-end (`azd up` on a fresh environment) where possible.
+3. Run the relevant tests locally:
+   ```bash
+   .venv/bin/python -m unittest discover -s tests
+   az bicep lint --file infra/main.bicep
+   ```
+   See [the README](README.md#try-it-locally) for dependencies and conditional
+   tests. For infrastructure changes, review `azd provision --preview` in a
+   disposable environment before any explicitly approved deployment. Tests do
+   not require cloud provisioning or model calls.
 4. Open a pull request against `main` with a clear description of what changes
    and why.
 

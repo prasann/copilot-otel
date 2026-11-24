@@ -9,8 +9,10 @@ param environmentName string
 @description('Primary location for all resources.')
 param location string
 
-@description('Object ID of the user who should get Grafana Admin. Defaults to the azd principal.')
-param principalId string = ''
+@minLength(36)
+@maxLength(36)
+@description('Object ID of the signed-in azd user who will query data and publish assessments.')
+param principalId string
 
 var tags = {
   'azd-env-name': environmentName
@@ -21,7 +23,8 @@ var abbrs = {
   resourceGroup: 'rg'
   logAnalytics: 'log'
   appInsights: 'appi'
-  grafana: 'amg'
+  dashboard: 'dash'
+  assessmentRule: 'dcr'
 }
 
 var rgName = '${abbrs.resourceGroup}-${environmentName}'
@@ -42,14 +45,22 @@ module core 'core.bicep' = {
     principalId: principalId
     logAnalyticsName: '${abbrs.logAnalytics}-${resourceToken}'
     appInsightsName: '${abbrs.appInsights}-${resourceToken}'
-    grafanaName: '${abbrs.grafana}-${resourceToken}'
+    dashboardName: '${abbrs.dashboard}-${resourceToken}'
+    assessmentRuleName: '${abbrs.assessmentRule}-${resourceToken}'
   }
 }
 
 output AZURE_LOCATION string = location
 output AZURE_RESOURCE_GROUP string = rg.name
-output APPLICATIONINSIGHTS_CONNECTION_STRING string = core.outputs.appInsightsConnectionString
 output APPLICATIONINSIGHTS_NAME string = core.outputs.appInsightsName
+output APPLICATIONINSIGHTS_RESOURCE_ID string = core.outputs.appInsightsId
 output LOG_ANALYTICS_WORKSPACE_ID string = core.outputs.logAnalyticsId
-output GRAFANA_ENDPOINT string = core.outputs.grafanaEndpoint
-output GRAFANA_NAME string = core.outputs.grafanaName
+output LOG_ANALYTICS_WORKSPACE_CUSTOMER_ID string = core.outputs.logAnalyticsCustomerId
+output GRAFANA_DASHBOARD_RESOURCE_ID string = core.outputs.dashboardId
+output ASSESSMENT_DCR_RESOURCE_ID string = core.outputs.assessmentRuleId
+output ASSESSMENT_DCR_IMMUTABLE_ID string = core.outputs.assessmentRuleImmutableId
+output ASSESSMENT_LOGS_INGESTION_ENDPOINT string = core.outputs.assessmentIngestionEndpoint
+output ASSESSMENT_STREAM_NAME string = core.outputs.assessmentStream
+output ASSESSMENT_TABLE_NAME string = core.outputs.assessmentTableName
+output TELEMETRY_TRACES_ENDPOINT string = core.outputs.telemetryTracesEndpoint
+output TELEMETRY_DCR_RESOURCE_ID string = core.outputs.telemetryRuleId
