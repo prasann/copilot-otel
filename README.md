@@ -169,7 +169,7 @@ Uninstall removes the recognized LaunchAgent, not its retained data.
 The default receiver on `127.0.0.1:4318` still marks spans `unattributed`.
 An optional local gateway on `127.0.0.1:4319` resolves exact session identities
 against the read-only native catalog and persisted host/SDK ID mapping. It sends
-approved aliases to a separate collector receiver on `127.0.0.1:4320`, which
+project aliases to a separate collector receiver on `127.0.0.1:4320`, which
 filters before its existing disk queue. Raw workspace paths are never added to
 exports. Attribution does not verify usage accounting.
 
@@ -178,18 +178,26 @@ paths; JSON values do not expand `~` or environment variables):
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "editor": "/Users/you/Library/Application Support/Code - Insiders",
-  "projects": {
-    "personal/copilot-otel": "/absolute/path/to/copilot-otel",
-    "work/example": "/absolute/path/to/another-project"
-  }
+  "projects_root": "/Users/you/projects",
+  "excluded_workspaces": []
 }
 ```
 
-Only exact, explicitly approved project workspaces are eligible. Duplicate
-folder names are supported; overlapping project roots and `synthetic/demo` are
-rejected. Attribution policy is independent of coaching and enables no model calls. Existing native sessions can identify
+Local workspaces in the native session catalog beneath `projects_root` are
+discovered automatically on each export, without registering new projects or
+reinstalling the collector. For `/Users/prasanna/projects`, a workspace beneath
+`personal/copilot-otel` gets alias `personal/copilot-otel`, and one beneath
+`msft/example` gets `msft/example`. Nested workspaces share their category/project
+alias; workspaces directly beneath the root use `projects/folder-name`.
+Aliases must contain two components of 1-63 ASCII letters, digits, dots,
+underscores, or hyphens. Unsupported names remain unattributed; `synthetic/demo`
+is reserved. Raw absolute paths are not exported, but category and project names are.
+Add absolute directory paths to `excluded_workspaces` to exclude them and all
+descendants. Paths are resolved, so symlinks escaping the root are not eligible.
+Version 1 policies with an explicit `projects` map retain their allowlist behavior.
+Attribution policy is independent of coaching and enables no model calls. Existing native sessions can identify
 **new incoming spans**; no old telemetry or conversation history is replayed.
 
 After reviewing that scope, opt in explicitly:
@@ -212,8 +220,9 @@ you enabled above to `http://127.0.0.1:4319`: use
 Insiders for Agent Host changes; reload the window for extension-only changes.
 The health response reports `status: "ok"`, `collector: "reachable"`, and
 `cloud_delivery: "not_checked"`. It checks local reachability, not Azure delivery or complete
-identity coverage. Policy is loaded at gateway startup; policy changes require
-restarting the gateway and reinstalling the collector with the updated policy.
+identity coverage. Policy is loaded at gateway startup; changes to the root or exclusions require
+restarting the gateway. Switching policy versions or changing a version 1
+allowlist also requires reinstalling the collector with the updated policy.
 The dedicated receiver trusts local processes; loopback is not an authentication
 boundary against other processes/users on the same machine.
 

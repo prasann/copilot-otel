@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from tools.azure_cli import ROOT, azd_value, rest
-from tools.attribution import COLLECTOR_PORT, Policy, REASONS
+from tools.attribution import COLLECTOR_PORT, PROJECT_ALIAS_PATTERN, Policy, REASONS
 
 
 VERSION = "0.165.0"
@@ -59,6 +59,7 @@ def credentials_environment() -> dict[str, str]:
 
 def configuration(
     endpoint: str, directory: Path, attribution_projects: tuple[str, ...] = (),
+    *, discover_projects: bool = False,
 ) -> dict[str, Any]:
     url = urlsplit(endpoint)
     if (url.scheme != "https" or not url.hostname
@@ -71,7 +72,7 @@ def configuration(
     config["extensions"]["file_storage"]["directory"] = str(directory / "queue")
     config["extensions"]["file_storage"]["compaction"]["directory"] = str(directory / "compaction")
     config["exporters"]["otlp_http/azure"]["traces_endpoint"] = endpoint
-    if attribution_projects:
+    if attribution_projects or discover_projects:
         processor = copy.deepcopy(config["processors"]["transform/metadata"])
         statements = processor["trace_statements"][0]["statements"]
         statements[:0] = [
@@ -87,19 +88,28 @@ def configuration(
                     'and cache["project.id"] == "unattributed" '
                     'and cache["attribution.status"] == "unattributed"'
                 )
+        conditions = []
+        if discover_projects:
+            conditions.append(
+                'IsString(cache["project.id"]) '
+                f'and IsMatch(cache["project.id"], "^{PROJECT_ALIAS_PATTERN}$") '
+                'and cache["project.id"] != "synthetic/demo"'
+            )
         for alias in attribution_projects:
             if not isinstance(alias, str) or not re.fullmatch(
-                r"[a-zA-Z0-9._-]{1,63}/[a-zA-Z0-9._-]{1,63}", alias,
+                PROJECT_ALIAS_PATTERN, alias,
             ) or alias == "synthetic/demo":
                 raise ValueError("Invalid attribution project alias")
+            conditions.append(f'cache["project.id"] == "{alias}"')
+        for project_condition in conditions:
             condition = (
-                f'cache["project.id"] == "{alias}" '
+                f'{project_condition} '
                 'and cache["attribution.status"] == "attributed" '
                 'and cache["attribution.reason"] == "resolved" '
                 'and cache["origin"] != "synthetic_collector_smoke"'
             )
             statements.extend([
-                f'set(attributes["project.id"], "{alias}") where {condition}',
+                f'set(attributes["project.id"], cache["project.id"]) where {condition}',
                 f'set(attributes["attribution.status"], "attributed") where {condition}',
                 f'set(attributes["attribution.reason"], "resolved") where {condition}',
             ])
@@ -224,8 +234,9 @@ def install(attribution_policy: Path | None = None) -> dict[str, str]:
     check_owned_plist()
     if service_loaded():
         raise ValueError("Stop the existing collector before reinstalling")
-    projects = tuple(Policy.load(attribution_policy).projects) if attribution_policy else ()
-    for port in (4318, 13133, COLLECTOR_PORT) if projects else (4318, 13133):
+    policy = Policy.load(attribution_policy) if attribution_policy else None
+    projects = tuple(policy.projects) if policy else ()
+    for port in (4318, 13133, COLLECTOR_PORT) if policy else (4318, 13133):
         with socket.socket() as check:
             if check.connect_ex(("127.0.0.1", port)) == 0:
                 raise ValueError(f"Port {port} is already in use; stop/review the existing listener")
@@ -234,7 +245,10 @@ def install(attribution_policy: Path | None = None) -> dict[str, str]:
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     HOME.chmod(0o700)
     binary = download(HOME)
-    config = configuration(azd_value("TELEMETRY_TRACES_ENDPOINT"), HOME, projects)
+    config = configuration(
+        azd_value("TELEMETRY_TRACES_ENDPOINT"), HOME, projects,
+        discover_projects=policy is not None and policy.projects_root is not None,
+    )
     config_path = HOME / "collector.json"
     config_path.touch(mode=0o600, exist_ok=True)
     config_path.chmod(0o600)

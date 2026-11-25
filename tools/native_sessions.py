@@ -52,6 +52,7 @@ class Candidate:
 def discover(
     editor: Path, projects: dict[str, str], since_ms: int,
     projects_root: Path | None = None, root_since_ms: int | None = None,
+    excluded_workspaces: tuple[Path, ...] = (),
 ) -> tuple[list[Candidate], int]:
     candidates = []
     excluded = 0
@@ -99,7 +100,14 @@ def discover(
             ).fetchall()
             if len(candidates) + len(rows) > MAX_SESSIONS:
                 raise CaptureError("source_session_limit_exceeded")
-            candidates.extend(catalog_candidate(row, None, root) for row in rows)
+            for row in rows:
+                workspace = local_path(json.loads(row[5])["data"]["project"]["uri"])
+                if (not workspace.is_relative_to(root)
+                        or any(workspace.is_relative_to(excluded_root)
+                               for excluded_root in excluded_workspaces)):
+                    excluded += 1
+                    continue
+                candidates.append(catalog_candidate(row, None, root))
     candidates.sort(key=lambda candidate: (candidate.started_ms, candidate.host_id))
     return candidates, excluded
 
@@ -120,12 +128,12 @@ def catalog_candidate(row: tuple[Any, ...], alias: str | None, path: Path) -> Ca
             raise CaptureError("missing_project_folder")
         alias = "/".join(relative[:2]) if len(relative) >= 2 else f"projects/{relative[0]}"
         path = workspace
-    if (type(revision) is not int or revision < 1
+    if (type(revision) is not int
             or type(data.get("isArchived")) is not bool):
         raise CaptureError("unsupported_catalog_record")
     chats = data.get("chats", [])
     supported = (
-        provider == "copilotcli" and version == 2
+        revision >= 1 and provider == "copilotcli" and version == 2
         and wrapper.get("payloadVersion") == 2
         and len(chats) == 1 and chats[0].get("kind") == "default"
         and all(local_path(directory).is_relative_to(path)

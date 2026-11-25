@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from collections import Counter
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -32,16 +32,33 @@ REASONS = (
 )
 ATTRIBUTION_KEYS = {"project.id", "attribution.status", "attribution.reason"}
 IDENTITY_KEYS = {"gen_ai.conversation.id", "vscode.agent_host.session.uri"}
+PROJECT_ALIAS_PATTERN = r"[a-zA-Z0-9._-]{1,63}/[a-zA-Z0-9._-]{1,63}"
 
 
 @dataclass(frozen=True)
 class Policy:
     editor: Path
-    projects: dict[str, str]
+    projects: dict[str, str] = field(default_factory=dict)
+    projects_root: Path | None = None
+    excluded_workspaces: tuple[Path, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> "Policy":
         value = json.loads(path.read_text())
+        if isinstance(value, dict) and type(value.get("version")) is int and value["version"] == 2:
+            if (set(value) != {"version", "editor", "projects_root", "excluded_workspaces"}
+                    or any(not isinstance(value[key], str) or not Path(value[key]).is_absolute()
+                           for key in ("editor", "projects_root"))
+                    or not isinstance(value["excluded_workspaces"], list)
+                    or any(not isinstance(item, str) or not Path(item).is_absolute()
+                           for item in value["excluded_workspaces"])):
+                raise ValueError("Invalid discovery policy; use absolute paths and excluded_workspaces")
+            root = Path(value["projects_root"]).resolve()
+            excluded = tuple(Path(item).resolve() for item in value["excluded_workspaces"])
+            if any(not item.is_relative_to(root) for item in excluded):
+                raise ValueError("Excluded workspaces must be inside projects_root")
+            return cls(Path(value["editor"]).resolve(), projects_root=root,
+                       excluded_workspaces=excluded)
         if (not isinstance(value, dict) or type(value.get("version")) is not int
                 or value["version"] != 1
                 or set(value) != {"version", "editor", "projects"}
@@ -51,7 +68,7 @@ class Policy:
             raise ValueError("Invalid attribution policy; expected version, editor, and projects")
         projects = {}
         for alias, workspace in value["projects"].items():
-            if (not re.fullmatch(r"[a-zA-Z0-9._-]{1,63}/[a-zA-Z0-9._-]{1,63}", alias)
+            if (not re.fullmatch(PROJECT_ALIAS_PATTERN, alias)
                     or alias == "synthetic/demo"
                     or not isinstance(workspace, str) or not Path(workspace).is_absolute()):
                 raise ValueError("Use category/name aliases and absolute workspace paths")
@@ -107,9 +124,15 @@ class Resolver:
         incomplete = False
         mappings = {}
         try:
-            candidates, _ = native.discover(self.policy.editor, self.policy.projects, 0)
+            candidates, _ = native.discover(
+                self.policy.editor, self.policy.projects, 0,
+                projects_root=self.policy.projects_root,
+                excluded_workspaces=self.policy.excluded_workspaces,
+            )
             for candidate in candidates:
-                if not candidate.supported:
+                if (not candidate.supported
+                        or not re.fullmatch(PROJECT_ALIAS_PATTERN, candidate.project_id)
+                        or candidate.project_id == "synthetic/demo"):
                     blocked.add(candidate.host_id)
                     incomplete = True
                     continue
@@ -122,7 +145,11 @@ class Resolver:
                 mappings[candidate.host_id] = sdk_id
                 for key in (candidate.host_id, sdk_id):
                     identities.setdefault(key, set()).add((candidate.host_id, candidate.project_id))
-            current, _ = native.discover(self.policy.editor, self.policy.projects, 0)
+            current, _ = native.discover(
+                self.policy.editor, self.policy.projects, 0,
+                projects_root=self.policy.projects_root,
+                excluded_workspaces=self.policy.excluded_workspaces,
+            )
             if current != candidates:
                 raise ValueError("Catalog changed during lookup")
             if any(sdk_session_id(self.policy.editor, host) != sdk

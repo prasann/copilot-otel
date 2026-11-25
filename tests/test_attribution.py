@@ -129,6 +129,85 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(snapshot.resolve(self.attributes(self.beta[0])).project, "unattributed")
         self.assertEqual(snapshot.resolve(self.attributes(self.alpha[0])).project, "personal/alpha")
 
+    def discovery_policy(self, excluded: list[str] | None = None) -> attribution.Policy:
+        self.policy_file.write_text(json.dumps({
+            "version": 2, "editor": str(self.editor),
+            "projects_root": str(self.root / "projects"),
+            "excluded_workspaces": excluded or [],
+        }))
+        return attribution.Policy.load(self.policy_file)
+
+    def test_discovery_includes_new_projects_but_excludes_directories_and_outside_root(self) -> None:
+        root = self.root / "projects"
+        excluded = root / "msft/private"
+        resolver = attribution.Resolver(self.discovery_policy([str(excluded)]))
+        included = None
+        self.assertEqual(resolver.snapshot().resolve(
+            self.attributes(self.alpha[0])).project, "unattributed")
+        for alias, folder, expected in (
+            ("personal/new", "personal/new", "personal/new"),
+            ("msft/public", "msft/public", "msft/public"),
+            ("personal/nested", "personal/new/subfolder", "personal/new"),
+            ("msft/private", "msft/private", "unattributed"),
+            ("msft/child", "msft/private/child", "unattributed"),
+            ("msft/private-other", "msft/private-other", "msft/private-other"),
+        ):
+            self.projects[alias] = str(root / folder)
+            identities = self.add_session(alias)
+            if alias == "personal/new":
+                included = identities[0]
+            for identity in identities:
+                with self.subTest(folder=folder, identity=identity):
+                    self.assertEqual(resolver.snapshot().resolve(
+                        self.attributes(identity)).project, expected)
+        excluded_policy = self.discovery_policy([str(root / "personal")])
+        snapshot = attribution.Resolver(excluded_policy).snapshot()
+        self.assertEqual(snapshot.resolve(
+            self.attributes(included)).project, "unattributed")
+        self.assertEqual(snapshot.resolve(
+            self.attributes(identities[0])).project, "msft/private-other")
+
+    def test_discovery_rejects_unsafe_alias_and_symlink_escape(self) -> None:
+        root = self.root / "projects"
+        root.mkdir()
+        (root / "linked").symlink_to(self.root / "alpha", target_is_directory=True)
+        self.projects["personal/linked"] = str(root / "linked/shared")
+        linked = self.add_session("personal/linked")
+        self.projects["personal/invalid"] = str(root / "personal/name with spaces")
+        invalid = self.add_session("personal/invalid")
+        resolver = attribution.Resolver(self.discovery_policy())
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = resolver.snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(linked[0])).project, "unattributed")
+        self.assertEqual(snapshot.resolve(self.attributes(invalid[0])).reason, "unsupported_source")
+
+    def test_discovery_policy_rejects_relative_paths_and_outside_exclusions(self) -> None:
+        for key, value in (
+            ("projects_root", "relative"),
+            ("excluded_workspaces", ["relative"]),
+            ("excluded_workspaces", [str(self.root / "outside")]),
+            ("excluded_workspaces", "not-an-array"),
+        ):
+            self.discovery_policy()
+            policy = json.loads(self.policy_file.read_text())
+            policy[key] = value
+            self.policy_file.write_text(json.dumps(policy))
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                attribution.Policy.load(self.policy_file)
+
+    def test_uninitialized_catalog_revision_does_not_block_other_discovered_projects(self) -> None:
+        policy = self.discovery_policy()
+        self.projects["personal/ready"] = str(self.root / "projects/personal/ready")
+        ready = self.add_session("personal/ready")
+        pending = self.add_session("personal/ready")
+        with closing(sqlite3.connect(self.catalog)) as db, db:
+            db.execute("UPDATE sessions_v2 SET source_revision = 0 WHERE session_uri = ?",
+                       (f"copilotcli:/{pending[0]}",))
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(ready[0])).project, "personal/ready")
+        self.assertEqual(snapshot.resolve(self.attributes(pending[0])).reason, "unsupported_source")
+
     def test_policy_rejects_overlaps_bad_aliases_and_relative_paths(self) -> None:
         for projects in (
             {"bad/alias/extra": "/tmp/example"},
@@ -373,6 +452,17 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(received, [])
 
     def test_gateway_to_pinned_collector_filters_content_and_preserves_exact_attribution(self) -> None:
+        self.check_gateway_to_pinned_collector()
+
+    def test_discovery_gateway_to_pinned_collector_accepts_new_aliases_without_reinstall(self) -> None:
+        self.policy = self.discovery_policy()
+        for alias in self.projects:
+            self.projects[alias] = str(self.policy.projects_root / alias)
+        self.alpha = self.add_session("personal/alpha")
+        self.beta = self.add_session("work/beta")
+        self.check_gateway_to_pinned_collector(discover_projects=True)
+
+    def check_gateway_to_pinned_collector(self, discover_projects: bool = False) -> None:
         binary = collector.HOME / collector.BINARY_PATH
         if not binary.exists():
             self.skipTest("Pinned collector not installed; no download performed")
@@ -383,7 +473,10 @@ class AttributionTests(unittest.TestCase):
                 ports.append(listener.getsockname()[1])
         endpoint = ("https://synthetic.southindia-1.ingest.monitor.azure.com/"
                     "datacollectionRules/dcr-test/streams/Microsoft-OTLP-Traces/otlp/v1/traces")
-        config = collector.configuration(endpoint, self.root, tuple(self.projects))
+        config = collector.configuration(
+            endpoint, self.root, () if discover_projects else tuple(self.projects),
+            discover_projects=discover_projects,
+        )
         for name, port in zip(("otlp", "otlp/attributed"), ports):
             config["receivers"][name]["protocols"]["http"]["endpoint"] = f"127.0.0.1:{port}"
         config["extensions"] = {}
@@ -428,13 +521,32 @@ class AttributionTests(unittest.TestCase):
             payload["resourceSpans"][0]["resource"] = {"attributes": [{
                 "key": "workspace.path", "value": {"stringValue": "PATH_MUST_DISAPPEAR"},
             }]}
-            for _ in range(2):
+            for export_index in range(2):
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{gateway.server_address[1]}/v1/traces",
                     data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"},
                 )
                 with self.opener.open(request, timeout=10) as response:
                     self.assertEqual(response.status, 200)
+                if discover_projects and export_index == 0:
+                    for project in (
+                        {"stringValue": "/Users/private/workspace"},
+                        {"stringValue": "personal/name with spaces"},
+                        {"stringValue": "synthetic/demo"},
+                        {"intValue": "42"},
+                    ):
+                        invalid = self.payload([
+                            {"key": "project.id", "value": project},
+                            {"key": "attribution.status", "value": {"stringValue": "attributed"}},
+                            {"key": "attribution.reason", "value": {"stringValue": "resolved"}},
+                        ])
+                        request = urllib.request.Request(
+                            f"http://127.0.0.1:{ports[1]}/v1/traces",
+                            data=json.dumps(invalid).encode(),
+                            headers={"Content-Type": "application/json"},
+                        )
+                        with self.opener.open(request, timeout=10) as response:
+                            self.assertEqual(response.status, 200)
             direct = self.payload(self.attributes(self.alpha[0]) + [
                 {"key": "project.id", "value": {"stringValue": "personal/alpha"}},
                 {"key": "attribution.status", "value": {"stringValue": "attributed"}},
@@ -456,7 +568,9 @@ class AttributionTests(unittest.TestCase):
         self.assertNotIn(str(self.root), json.dumps(records))
         exported = [span for record in records for resource in record["resourceSpans"]
                     for scope in resource["scopeSpans"] for span in scope["spans"]]
-        self.assertEqual(len(exported), 9)
+        self.assertNotIn("/Users/private", json.dumps(records))
+        self.assertNotIn("name with spaces", json.dumps(records))
+        self.assertEqual(len(exported), 13 if discover_projects else 9)
         projects = []
         reasons = []
         for span in exported:
@@ -467,10 +581,12 @@ class AttributionTests(unittest.TestCase):
             self.assertEqual(span["traceId"], "a" * 32)
         self.assertEqual(projects.count("personal/alpha"), 2)
         self.assertEqual(projects.count("work/beta"), 2)
-        self.assertEqual(projects.count("unattributed"), 5)
+        self.assertEqual(projects.count("unattributed"), 9 if discover_projects else 5)
         self.assertEqual(reasons.count("missing_identity"), 2)
         self.assertEqual(reasons.count("identity_conflict"), 2)
         self.assertEqual(reasons.count(None), 1)
+        if discover_projects:
+            self.assertEqual(reasons.count("invalid_gateway_metadata"), 4)
 
 
 if __name__ == "__main__":
