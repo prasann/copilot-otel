@@ -126,7 +126,7 @@ def catalog_candidate(row: tuple[Any, ...], alias: str | None, path: Path) -> Ca
         relative = workspace.relative_to(path).parts
         if not relative:
             raise CaptureError("missing_project_folder")
-        alias = "/".join(relative[:2]) if len(relative) >= 2 else f"projects/{relative[0]}"
+        alias = f"{relative[0]}/{relative[-1]}" if len(relative) >= 2 else f"projects/{relative[0]}"
         path = workspace
     if (type(revision) is not int
             or type(data.get("isArchived")) is not bool):

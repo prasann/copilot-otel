@@ -147,7 +147,10 @@ class AttributionTests(unittest.TestCase):
         for alias, folder, expected in (
             ("personal/new", "personal/new", "personal/new"),
             ("msft/public", "msft/public", "msft/public"),
-            ("personal/nested", "personal/new/subfolder", "personal/new"),
+            ("personal/nested", "personal/new/subfolder", "personal/subfolder"),
+            ("msft/nested", "msft/scb/COIN_AI_SDK", "msft/COIN_AI_SDK"),
+            ("personal/deep", "personal/experiments/tools/my-app", "personal/my-app"),
+            ("standalone", "standalone", "projects/standalone"),
             ("msft/private", "msft/private", "unattributed"),
             ("msft/child", "msft/private/child", "unattributed"),
             ("msft/private-other", "msft/private-other", "msft/private-other"),
@@ -166,6 +169,39 @@ class AttributionTests(unittest.TestCase):
             self.attributes(included)).project, "unattributed")
         self.assertEqual(snapshot.resolve(
             self.attributes(identities[0])).project, "msft/private-other")
+
+    def test_discovery_rejects_alias_collisions_without_blocking_other_projects(self) -> None:
+        policy = self.discovery_policy()
+        root = self.root / "projects"
+        identities = {}
+        for alias, folder in (
+            ("first", "msft/team-one/shared"),
+            ("second", "msft/team-two/shared"),
+            ("other-category", "personal/shared"),
+            ("unrelated", "msft/unique"),
+        ):
+            self.projects[alias] = str(root / folder)
+            identities[alias] = self.add_session(alias)
+        duplicate_session = self.add_session("other-category")
+        with self.assertLogs(attribution.LOG, logging.WARNING) as logs:
+            snapshot = attribution.Resolver(policy).snapshot()
+        for alias in ("first", "second"):
+            for identity in identities[alias]:
+                with self.subTest(alias=alias, identity=identity):
+                    result = snapshot.resolve(self.attributes(identity))
+                    self.assertEqual(result.project, "unattributed")
+                    self.assertEqual(result.reason, "identity_conflict")
+        for identity in (*identities["other-category"], *duplicate_session):
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/shared")
+        self.assertEqual(snapshot.resolve(
+            self.attributes(identities["unrelated"][1])).project, "msft/unique")
+        self.assertNotIn(str(root), "".join(logs.output))
+        snapshot = attribution.Resolver(self.discovery_policy(
+            [str(root / "msft/team-two")])).snapshot()
+        for identity in identities["first"]:
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "msft/shared")
+        self.assertEqual(snapshot.resolve(
+            self.attributes(identities["second"][1])).project, "unattributed")
 
     def test_discovery_rejects_unsafe_alias_and_symlink_escape(self) -> None:
         root = self.root / "projects"

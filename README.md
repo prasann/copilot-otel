@@ -189,8 +189,13 @@ Local workspaces in the native session catalog beneath `projects_root` are
 discovered automatically on each export, without registering new projects or
 reinstalling the collector. For `/Users/prasanna/projects`, a workspace beneath
 `personal/copilot-otel` gets alias `personal/copilot-otel`, and one beneath
-`msft/example` gets `msft/example`. Nested workspaces share their category/project
-alias; workspaces directly beneath the root use `projects/folder-name`.
+`msft/scb/COIN_AI_SDK` gets `msft/COIN_AI_SDK`. The first folder beneath the root
+is the category and the workspace's final folder is the project name;
+intermediate folders are ignored. Opening a project's subfolder as the workspace
+uses that subfolder's name, not the enclosing project's name. Workspaces directly
+beneath the root use `projects/folder-name`. Distinct discovered workspace paths
+with the same alias remain unattributed with `identity_conflict`, rather than
+combining unrelated projects. Multiple sessions in the same workspace are allowed.
 Aliases must contain two components of 1-63 ASCII letters, digits, dots,
 underscores, or hyphens. Unsupported names remain unattributed; `synthetic/demo`
 is reserved. Raw absolute paths are not exported, but category and project names are.
@@ -199,6 +204,8 @@ descendants. Paths are resolved, so symlinks escaping the root are not eligible.
 Version 1 policies with an explicit `projects` map retain their allowlist behavior.
 Attribution policy is independent of coaching and enables no model calls. Existing native sessions can identify
 **new incoming spans**; no old telemetry or conversation history is replayed.
+After updating the gateway code, restart it to use the new naming rule.
+Historical records retain their original aliases.
 
 After reviewing that scope, opt in explicitly:
 

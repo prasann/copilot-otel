@@ -129,6 +129,12 @@ class Resolver:
                 projects_root=self.policy.projects_root,
                 excluded_workspaces=self.policy.excluded_workspaces,
             )
+            workspaces: dict[str, set[Path]] = {}
+            for candidate in candidates:
+                workspaces.setdefault(candidate.project_id, set()).add(candidate.workspace)
+            conflicting_projects = {
+                project for project, paths in workspaces.items() if len(paths) > 1
+            }
             for candidate in candidates:
                 if (not candidate.supported
                         or not re.fullmatch(PROJECT_ALIAS_PATTERN, candidate.project_id)
@@ -160,7 +166,10 @@ class Resolver:
             return Snapshot({}, set(), "lookup_failed")
         if incomplete:
             LOG.warning("Attribution metadata incomplete; unresolved spans remain unattributed")
-        return Snapshot(identities, blocked, "lookup_incomplete" if incomplete else "unknown_session")
+        if conflicting_projects:
+            LOG.warning("Attribution project aliases conflict; affected spans remain unattributed")
+        return Snapshot(identities, blocked, "lookup_incomplete" if incomplete else "unknown_session",
+                        conflicting_projects)
 
 
 @dataclass
@@ -168,6 +177,7 @@ class Snapshot:
     identities: dict[str, set[tuple[str, str]]]
     blocked: set[str]
     unknown_reason: str
+    conflicting_projects: set[str] = field(default_factory=set)
 
     def resolve(self, attributes: list[dict[str, Any]]) -> Resolution:
         keys = {}
@@ -202,7 +212,10 @@ class Snapshot:
                 return Resolution(reason=self.unknown_reason)
             if len(found) != 1:
                 return Resolution(reason="identity_conflict")
-            matches.append(next(iter(found)))
+            match = next(iter(found))
+            if match[1] in self.conflicting_projects:
+                return Resolution(reason="identity_conflict")
+            matches.append(match)
         if len(set(matches)) != 1:
             return Resolution(reason="identity_conflict")
         return Resolution(matches[0][1], "resolved")
