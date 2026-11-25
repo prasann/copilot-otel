@@ -112,6 +112,22 @@ class CoachingTests(unittest.TestCase):
         self.assertFalse(any(argument.startswith(("--allow-all", "--yolo")) for argument in arguments))
         self.assertNotIn("COPILOT_ALLOW_ALL", invoke.call_args.kwargs["env"])
 
+    def test_azure_tls_configuration_is_scoped_and_honors_explicit_configuration(self) -> None:
+        for configured in (None, "/custom/openssl.cnf"):
+            with self.subTest(configured=configured), \
+                    patch.dict(coaching.os.environ, {"PATH": "/usr/bin"}, clear=True), \
+                    patch.object(coaching, "azure_rest", return_value={"ok": True}) as send:
+                if configured:
+                    coaching.os.environ["OPENSSL_CONF"] = configured
+                before = dict(coaching.os.environ)
+                self.assertEqual(coaching.rest("url", "resource", {"input": "report"}), {"ok": True})
+                send.assert_called_once_with(
+                    "url", "resource", {"input": "report"},
+                    env={**before, "OPENSSL_CONF": configured or str(
+                        coaching.ROOT / "tools" / "coaching-openssl.cnf")},
+                )
+                self.assertEqual(dict(coaching.os.environ), before)
+
     def test_failed_upload_is_republished_from_receipt_without_rerunning_chronicle(self) -> None:
         def send(url, audience, body):
             if audience == "https://ai.azure.com":

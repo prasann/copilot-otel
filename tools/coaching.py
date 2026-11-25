@@ -26,7 +26,8 @@ from typing import Any, Callable, Generator
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from tools.azure_cli import ROOT, azd_value, load_config, response_text, rest
+from tools.azure_cli import ROOT, azd_value, load_config, response_text
+from tools.azure_cli import rest as azure_rest
 
 
 STATE = Path.home() / "Library/Application Support/copilot-otel/coaching"
@@ -96,6 +97,12 @@ ITEMS = Draft202012Validator({
 
 class CoachingError(ValueError):
     """A controlled operational error that never contains report content."""
+
+
+def rest(url: str, resource: str, body: Any) -> Any:
+    env = dict(os.environ)
+    env.setdefault("OPENSSL_CONF", str(ROOT / "tools" / "coaching-openssl.cnf"))
+    return azure_rest(url, resource, body, env=env)
 
 
 def atomic_json(path: Path, value: Any) -> None:

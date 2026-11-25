@@ -18,6 +18,15 @@ class AzureCliTests(unittest.TestCase):
         self.assertNotIn(body["input"], " ".join(send.call_args.args[0]))
         self.assertEqual(json.loads(send.call_args.kwargs["input"]), body)
 
+    def test_rest_passes_the_subprocess_environment_without_changing_request_handling(self) -> None:
+        env = {"OPENSSL_CONF": "/custom/openssl.cnf"}
+        response = subprocess.CompletedProcess(args=[], returncode=0, stdout='{"ok": true}')
+        with patch.object(helpers.subprocess, "run", return_value=response) as send:
+            self.assertEqual(helpers.rest("https://example.test", "audience", {}, env=env),
+                             {"ok": True})
+        self.assertEqual(send.call_args.kwargs["env"], env)
+        self.assertEqual(send.call_args.kwargs["input"], "{}")
+
     def test_config_rejects_non_origin_and_foreign_host(self) -> None:
         config = {
             "COACHING_AZURE_AUTH": "azure_cli",

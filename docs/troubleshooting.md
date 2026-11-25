@@ -53,6 +53,14 @@ coaching state folder. Failures report a fixed reason, never report text:
 | `chronicle_<kind>_possible_secret` | A secret pattern appeared in the report | Nothing was saved or sent to Azure; run the Chronicle command manually to find the source session |
 | `Item contains disallowed content` / `ValidationError` | Model output failed validation | Inspect the report; retry tomorrow or with `--retry` |
 | `RuntimeError` with a `results/` file present | Upload failed after a valid result | `tools.coaching publish <run-id>` |
+| `RuntimeError` with reports but no result | Azure model request failed before a validated result was saved | Check Azure sign-in and TLS connectivity; do not rerun Chronicle just to test connectivity |
+
+An `SSLEOFError` / `UNEXPECTED_EOF_WHILE_READING` from Azure CLI can be a TLS
+key-share negotiation failure, not a missing certificate. Coaching uses a
+process-local P-256-first OpenSSL configuration for its Azure calls (see
+[setup](coaching.md#setup)). If it still fails, check whether an explicit
+`OPENSSL_CONF` overrides it and contact network support. Never disable certificate
+verification as a workaround.
 
 After reprovisioning, re-run `tools.coaching enable --execute` so the cached
 ingestion IDs are current. A newly changed ingestion rule can reject uploads with

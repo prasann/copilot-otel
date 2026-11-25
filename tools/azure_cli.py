@@ -10,21 +10,26 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def command_json(arguments: list[str], *, input_text: str | None = None) -> Any:
+def command_json(
+    arguments: list[str], *, input_text: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Any:
     result = subprocess.run(
-        arguments, input=input_text, capture_output=True, text=True, timeout=180,
+        arguments, input=input_text, capture_output=True, text=True, timeout=180, env=env,
     )
     if result.returncode:
         raise RuntimeError(f"{arguments[0]} failed: {result.stderr.strip()[:2000]}")
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def rest(url: str, resource: str, body: Any) -> Any:
+def rest(
+    url: str, resource: str, body: Any, *, env: dict[str, str] | None = None,
+) -> Any:
     return command_json([
         "az", "rest", "--method", "post", "--url", url,
         "--resource", resource, "--body", "@/dev/stdin",
         "--only-show-errors", "--output", "json",
-    ], input_text=json.dumps(body))
+    ], input_text=json.dumps(body), env=env)
 
 
 def load_config(path: Path) -> dict[str, str]:

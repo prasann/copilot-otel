@@ -45,6 +45,14 @@ Nothing is published from a failed run.
 `enable` caches the ingestion endpoint, rule, and workspace IDs in the local policy
 so the scheduled job does not need `azd`. Re-run it after reprovisioning.
 
+Coaching's Azure CLI subprocesses use [a local OpenSSL configuration](../tools/coaching-openssl.cnf)
+that offers conventional TLS groups with P-256 first. This avoids handshake failures
+on network paths that reject OpenSSL's default hybrid key share. TLS 1.3 and
+certificate verification remain enabled; hybrid post-quantum groups are not
+offered by this configuration. Other jobs and Chronicle are unaffected. An explicit
+`OPENSSL_CONF` environment variable takes precedence, so custom OpenSSL policies
+are not overwritten.
+
 ## Schedule
 
 The LaunchAgent **Copilot Daily Coaching**

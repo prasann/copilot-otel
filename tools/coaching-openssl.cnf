@@ -1,0 +1,13 @@
+# Some network paths reject OpenSSL's default hybrid TLS key share.
+# This applies only to coaching's Azure CLI subprocesses, not system-wide.
+openssl_conf = coaching_init
+config_diagnostics = 1
+
+[coaching_init]
+ssl_conf = coaching_ssl
+
+[coaching_ssl]
+system_default = coaching_tls
+
+[coaching_tls]
+Groups = P-256:X25519:P-384:P-521
