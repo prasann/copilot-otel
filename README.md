@@ -10,7 +10,7 @@ Azure Monitor dashboard with Grafana. Native macOS collector, Python tools, and
 
 | Path | What it does | Verified | Still pending |
 | --- | --- | --- | --- |
-| Telemetry | VS Code Insiders OTLP metadata → local filtering collector → Azure; optional exact-ID project attribution | Real-session spans attributed to `personal/copilot-otel` and visible in the dashboard | Second-project attribution; usage reconciliation; gateway restart after reboot |
+| Telemetry | VS Code Insiders / desktop OTLP metadata → local filtering collector → Azure; exact-ID project attribution with exclusions | VS Code attribution in Azure; desktop 1.5.0 local HTTP/JSON and exact catalog-ID join | Desktop gateway/Azure acceptance; source dashboard deployment; second-project attribution; usage reconciliation; gateway restart after reboot |
 | Coaching | Daily Copilot CLI `/chronicle tips` + `/chronicle standup` → Azure model normalizes the reports → `CopilotInsights_CL` | First run on 24 November 2026: 14 items published, query-verified, and returned by every coaching panel query | First scheduled 09:00 run and wake/login catch-up; trend usefulness over a few weeks |
 
 Telemetry does not trigger coaching and coaching does not read telemetry.
@@ -27,6 +27,7 @@ flowchart LR
     Coach["Coaching worker<br/>validates derived items"]
     Client -->|OTLP| Filter
     Client -->|opt-in OTLP| Gateway --> Filter
+    Desktop["Desktop<br/>NO_CONTENT"] --> Gateway
     Chronicle -->|short reports| Coach
   end
   Model["Azure OpenAI deployment<br/>reports only, store=false"]
@@ -164,11 +165,12 @@ of Azure delivery. State, queue, and warn/error logs are retained under
 for failures. Logs are not yet rotated. Expired authentication requires `az login`.
 Uninstall removes the recognized LaunchAgent, not its retained data.
 
-### Opt-in project attribution
+### Project attribution with exclusions
 
 The default receiver on `127.0.0.1:4318` still marks spans `unattributed`.
-An optional local gateway on `127.0.0.1:4319` resolves exact session identities
-against the read-only native catalog and persisted host/SDK ID mapping. It sends
+The local gateway on `127.0.0.1:4319` resolves exact session identities
+against read-only catalogs: VS Code's native host/SDK mapping and, for version-2
+discovery policies, desktop's `~/.copilot/session-store.db`. It sends
 project aliases to a separate collector receiver on `127.0.0.1:4320`, which
 filters before its existing disk queue. Raw workspace paths are never added to
 exports. Attribution does not verify usage accounting.
@@ -185,7 +187,7 @@ paths; JSON values do not expand `~` or environment variables):
 }
 ```
 
-Local workspaces in the native session catalog beneath `projects_root` are
+Local workspaces in either catalog beneath `projects_root` are
 discovered automatically on each export, without registering new projects or
 reinstalling the collector. For `/Users/prasanna/projects`, a workspace beneath
 `personal/copilot-otel` gets alias `personal/copilot-otel`, and one beneath
@@ -201,13 +203,18 @@ underscores, or hyphens. Unsupported names remain unattributed; `synthetic/demo`
 is reserved. Raw absolute paths are not exported, but category and project names are.
 Add absolute directory paths to `excluded_workspaces` to exclude them and all
 descendants. Paths are resolved, so symlinks escaping the root are not eligible.
+These are **attribution exclusions**, not collection exclusions: incoming spans
+still pass through as `unattributed`. Enabling telemetry remains a separate,
+explicit client configuration; keep content capture off.
 Version 1 policies with an explicit `projects` map retain their allowlist behavior.
+They use only the VS Code catalog; version 2 reads both catalogs without a
+version bump or source-registration list.
 Attribution policy is independent of coaching and enables no model calls. Existing native sessions can identify
 **new incoming spans**; no old telemetry or conversation history is replayed.
 After updating the gateway code, restart it to use the new naming rule.
 Historical records retain their original aliases.
 
-After reviewing that scope, opt in explicitly:
+After reviewing that scope, start the pipeline:
 
 ```bash
 chmod 600 /absolute/path/to/attribution-policy.json
@@ -220,8 +227,8 @@ chmod 600 /absolute/path/to/attribution-policy.json
 
 The gateway runs **in the foreground**; keep that terminal open. It is not
 installed as a login service. In another terminal, check
-`curl --fail http://127.0.0.1:4319/health`, then set the endpoint for the client
-you enabled above to `http://127.0.0.1:4319`: use
+`curl --fail http://127.0.0.1:4319/health`, then set the endpoint for the VS Code client
+you enabled above to `http://127.0.0.1:4319/vscode`: use
 `chat.agentHost.otel.otlpEndpoint` for Agent Host, or
 `github.copilot.chat.otel.otlpEndpoint` for the extension. Fully quit and reopen
 Insiders for Agent Host changes; reload the window for extension-only changes.
@@ -233,13 +240,84 @@ allowlist also requires reinstalling the collector with the updated policy.
 The dedicated receiver trusts local processes; loopback is not an authentication
 boundary against other processes/users on the same machine.
 
-This first slice supports uncompressed OTLP HTTP/JSON and the tested local
-Agent Host default-chat schemas only. It reads no conversation/event files.
+The source-prefixed endpoints are `/vscode/v1/traces` and
+`/desktop/v1/traces` (and the corresponding metrics/logs routes). The gateway
+strips the prefix for forwarding and overwrites `telemetry.source` with
+`vscode` or `desktop` on every span, including unresolved spans. Existing
+unprefixed `/v1/traces` remains supported with source `unknown`.
+The label describes the **configured client ingress**, not the lookup catalog
+or an authenticated origin: another local process can use the same route.
+`telemetry.origin` remains `unverified_client`.
+
+The gateway supports uncompressed OTLP HTTP/JSON, the tested local
+Agent Host default-chat schemas, and desktop catalog schema 0 with
+`sessions(id TEXT PRIMARY KEY, cwd TEXT, host_type TEXT, ...)`. Desktop matches
+only `gen_ai.conversation.id` to a canonical UUID in `sessions.id`, for
+`host_type='github'` and an eligible absolute local cwd; the desktop workspace ID
+is not the runtime conversation ID. A labelled route scopes identity matching
+to its client; unlabelled matches in both catalogs conflict instead of choosing.
+Alias/path collisions are checked across both catalogs. Missing, unreadable,
+locked, changed, or incompatible metadata fails closed with content-free warnings;
+both catalogs are required for version-2 cross-source collision checks.
+Each catalog is bounded to 1,000 candidate sessions; an overflow fails lookup.
+It reads no conversation/event files.
 Unknown, missing, conflicting, unsupported, or changing identities remain
 `unattributed`, with fixed `attribution.reason` values; there is no active-project,
 basename, timestamp, or parent-trace guessing. Schema/lookup failures are warned,
 not silently treated as a successful lookup. Subagent, remote, multi-chat, and
 other-client coverage still need controlled proof.
+
+### Connect the desktop app
+
+Local-only capture on **desktop 1.5.0 / runtime 1.0.115-7** verified launch
+environment propagation, uncompressed HTTP/JSON delivery on 4319, and an exact
+conversation-ID/catalog match. Some other spans had unknown IDs; do not infer
+their projects. This does not establish full coverage or Azure delivery.
+Public current documentation may require HTTPS; this tested version accepts
+loopback HTTP. Reverify behavior after app/runtime updates.
+
+Start the collector/gateway above first. Fully quit the app, then launch its
+actual executable from a terminal with these child-process variables. Launching
+an already-running app does not replace its runtime environment.
+
+```bash
+env -u COPILOT_OTEL_FILE_EXPORTER_PATH \
+  -u OTEL_EXPORTER_OTLP_HEADERS \
+  -u OTEL_EXPORTER_OTLP_TRACES_HEADERS \
+  -u OTEL_EXPORTER_OTLP_METRICS_HEADERS \
+  -u OTEL_EXPORTER_OTLP_LOGS_HEADERS \
+  COPILOT_OTEL_ENABLED=true \
+  COPILOT_OTEL_EXPORTER_TYPE=otlp-http \
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4319/desktop \
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4319/desktop/v1/traces \
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://127.0.0.1:4319/desktop/v1/metrics \
+  OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:4319/desktop/v1/logs \
+  OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
+  OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/json \
+  OTEL_EXPORTER_OTLP_METRICS_PROTOCOL=http/json \
+  OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json \
+  OTEL_EXPORTER_OTLP_COMPRESSION=none \
+  OTEL_EXPORTER_OTLP_TRACES_COMPRESSION=none \
+  OTEL_EXPORTER_OTLP_METRICS_COMPRESSION=none \
+  OTEL_EXPORTER_OTLP_LOGS_COMPRESSION=none \
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_CONTENT=NO_CONTENT \
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false \
+  "/Applications/GitHub Copilot.app/Contents/MacOS/github"
+```
+
+This does not change `launchctl`, a GUI setting, or login startup. Finder/Dock
+launches and app updates may not retain it. Managed policy can override runtime
+settings; review effective behavior before normal forwarding. The prefixed
+routes are covered by offline tests but still need real-client acceptance.
+The gateway remains foreground-only.
+
+`NO_CONTENT` is not identity suppression: `enduser.pseudo.id` was emitted in the
+controlled test. The gateway receives unfiltered telemetry only in memory;
+the collector removes pseudonymous/resource identities and raw paths before
+its queue/upload. Project aliases and validated conversation UUIDs remain.
+Stop desktop telemetry by fully quitting and reopening normally without these
+variables, then verify the runtime no longer has them. Do not send synthetic
+spans bearing real session IDs through the normal pipeline.
 
 The gateway has no disk spool or automatic forwarding retries. Requests and
 responses are bounded to 1 MiB, exports to 10,000 spans, and socket operations to
@@ -257,10 +335,13 @@ visible with real attribution for `personal/copilot-otel`. Two-project acceptanc
 remains pending. New environments still require a separately reviewed
 infrastructure deployment; installing the gateway does not deploy dashboard changes.
 
-To disable: restore each enabled client's endpoint to `http://127.0.0.1:4318`,
+To disable attribution without disabling collection: restore each enabled
+client's endpoint (including per-signal overrides) to `http://127.0.0.1:4318`,
 restart Insiders for Agent Host changes (or reload for extension-only changes),
-stop the gateway with Ctrl-C, then stop/reinstall the collector without
-`--attribution-policy`. Historical Azure records are unchanged.
+and relaunch desktop with the adjusted environment. Stop the gateway with Ctrl-C,
+then stop/reinstall the collector without `--attribution-policy`. To disable
+desktop collection entirely, quit it and reopen without the telemetry environment
+as described above. Historical Azure records are unchanged.
 
 ## Reading the dashboard
 
@@ -271,22 +352,29 @@ Observed tokens by project | Observed tokens by model
 Copilot coaching
   Most repeated tip theme | Latest tips
   Tip themes over time    | Latest standup
-  > Inspect data: individual spans with attribution diagnostics
+  > Inspect data: individual spans and client-source comparison
   > Pilot notes: privacy, accounting, and analysis scope
 ```
 
 Open **Azure Monitor > Dashboards with Grafana** in the portal. The
 [definition](dashboards/copilot-pilot.json) is deployed by Bicep, not imported
 manually. Queries use the signed-in reader's permissions. Project accepts `*`
-or an exact project ID and applies to telemetry panels only; refresh is five minutes.
+or an exact project ID. **Telemetry source** selects All, VS Code, Desktop, or
+Unknown. Both filters apply only to telemetry panels; refresh is five minutes.
+The dashboard definition must be deployed to expose the new source views; local
+code changes do not update the existing Azure dashboard.
 
 - Token cards, trend, and project/model tables sum reported usage from
   deduplicated `chat` spans only. These are **observed tokens, not billing or
   guaranteed complete usage**; transport loss and subagent overlap remain unverified.
 - Cache-read tokens are shown separately. Missing reporting is not treated as
   zero; `MissingUsage` and `MissingCache` expose incomplete chat-span reporting.
-- Direct native spans remain `unattributed`; the opt-in gateway labels exact,
+- Direct native spans remain `unattributed` with source `unknown`; the gateway labels exact,
   approved session identities. Expand **Inspect data** for per-span diagnostics.
+- Source is configured ingress, not authenticated origin. Historical/unprefixed
+  exports remain `unknown` and are included under All; they are not backfilled
+  as VS Code. Existing overview totals stay combined under All. The collapsed
+  source table compares reported chat usage without adding overlapping tool totals.
 - Coaching panels cover all projects. **Latest tips** and **Latest standup** show
   the most recent run in the selected range; **Tip themes over time** shows
   which habits keep recurring. Themes: `verification`, `planning`,
@@ -320,7 +408,7 @@ Each run calls Chronicle twice (capped at 30 Copilot AI credits each; about
 | --- | --- |
 | [tools/coaching.py](tools/coaching.py) | Daily Chronicle → Azure model → dashboard coaching worker |
 | [tools/native_collector.py](tools/native_collector.py) | Collector install, lifecycle, and synthetic delivery checks |
-| [tools/attribution.py](tools/attribution.py) | Opt-in metadata-only project resolver and foreground OTLP gateway |
+| [tools/attribution.py](tools/attribution.py) | VS Code/desktop exact-ID resolver and source-labelled foreground OTLP gateway |
 | [tools/native_sessions.py](tools/native_sessions.py) | Read-only VS Code session catalog lookups used by attribution |
 | [tools/azure_cli.py](tools/azure_cli.py) | Shared Azure CLI REST, `.env`, and `azd` helpers |
 | [collector/native-config.json](collector/native-config.json) | Trace privacy filter, authentication, durable queue |

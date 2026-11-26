@@ -6,9 +6,55 @@ before generating test traffic. A reachable collector or gateway does not prove
 Azure delivery; historical dashboard rows do not prove current service health.
 
 For attribution, follow the [client configuration and restart instructions](../README.md#connect-vs-code-insiders)
-and [gateway checks](../README.md#opt-in-project-attribution). Some spans have no
+and [gateway checks](../README.md#project-attribution-with-exclusions). Some spans have no
 session identity and correctly remain `unattributed` with `missing_identity`.
 Do not guess their project from the active workspace, timestamps, or parent trace.
+
+### Desktop and client-source attribution
+
+Version-2 discovery now reads both the configured VS Code catalog and the local
+desktop `~/.copilot/session-store.db`, using the same root/exclusions. Neither
+source requires registering projects. Exclusions prevent project attribution,
+not telemetry collection.
+
+Use `/vscode/v1/traces` or `/desktop/v1/traces` on gateway 4319 for a configured
+`telemetry.source` label. The source label remains present when project lookup
+fails. It is not authenticated origin or evidence that the ID was found.
+Unprefixed exports and direct 4318 exports use `unknown`; historical missing
+source values also show as Unknown in Grafana. Do not relabel old rows as VS Code.
+An All source filter retains them in totals; coaching ignores that filter.
+
+`unknown_session` means no eligible exact ID match. The desktop workspace UUID
+is not its runtime conversation UUID, and not every emitted span is covered by
+the local catalog. Do not treat unknown IDs as proof of a particular client.
+Check the labelled endpoint before suspecting the desktop/VS Code lookup.
+`identity_conflict` also covers distinct workspaces collapsing to the same alias.
+On the shared endpoint, an ID present in both catalogs conflicts; labelled
+routes namespace the ID by client.
+
+`lookup_failed` requires checking both metadata sources for availability,
+permissions, locks, supported schema, and the 1,000-session bound. Version 2
+fails closed when either catalog cannot be read, because global alias
+collisions could otherwise be concealed. It never creates a missing catalog.
+`unsupported_source` can identify a malformed known row; `lookup_incomplete`
+warns that some metadata cannot be used. No database or payload paths are logged.
+
+For desktop activation follow the [direct executable launch](../README.md#connect-the-desktop-app).
+Fully quit the existing app first; a second launch does not update the current
+runtime's variables. Check selected OTel variables only, never dump the whole
+process environment or logs containing credentials/content. Public current
+HTTPS guidance differs from the verified 1.5.0 runtime's local HTTP behavior;
+recheck after updates. Managed policy may override your environment.
+HTTP 415 means the gateway requires uncompressed `application/json`, not
+protobuf/gzip. Per-signal endpoint/protocol/compression variables take precedence
+over global ones; point all enabled signals to the local gateway.
+
+Keep `NO_CONTENT` and the legacy message-content switch off. Pseudonymous
+identity may still be emitted; the collector's allowlist strips it before the
+queue/cloud. Source-prefix routes require the updated gateway, and preserving
+source requires reinstalling the stopped collector with the same policy.
+The source-aware dashboard JSON also needs deployment; none of those steps
+is implied by a local `/health` success.
 
 ## Manual synthetic diagnostics
 

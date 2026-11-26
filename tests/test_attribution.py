@@ -26,6 +26,13 @@ class AttributionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
+        self.desktop = self.root / "desktop/session-store.db"
+        self.desktop.parent.mkdir()
+        with closing(sqlite3.connect(self.desktop)) as db:
+            db.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, host_type TEXT)")
+        desktop_path = patch.object(attribution, "DESKTOP_CATALOG", self.desktop)
+        desktop_path.start()
+        self.addCleanup(desktop_path.stop)
         self.editor = self.root / "editor"
         self.catalog = self.editor / "User/globalStorage/agent-host.db"
         self.catalog.parent.mkdir(parents=True)
@@ -136,6 +143,129 @@ class AttributionTests(unittest.TestCase):
             "excluded_workspaces": excluded or [],
         }))
         return attribution.Policy.load(self.policy_file)
+
+    def add_desktop(self, folder: str | None, host: str = "github",
+                    identity: str | None = None) -> str:
+        identity = identity or str(uuid.uuid4())
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("INSERT INTO sessions VALUES (?, ?, ?)", (identity, folder, host))
+        return identity
+
+    def test_desktop_exact_id_and_shared_workspace_with_vscode(self) -> None:
+        policy = self.discovery_policy()
+        workspace = policy.projects_root / "personal/alpha"
+        desktop = self.add_desktop(str(workspace))
+        self.projects["personal/alpha"] = str(workspace)
+        vscode = self.add_session("personal/alpha")
+        snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(desktop), "desktop").project, "personal/alpha")
+        self.assertEqual(snapshot.resolve(self.attributes(desktop)).project, "personal/alpha")
+        self.assertEqual(snapshot.resolve(self.attributes(vscode[1]), "vscode").project, "personal/alpha")
+        self.assertEqual(snapshot.resolve(self.attributes(desktop), "vscode").reason, "unknown_session")
+        self.assertEqual(snapshot.resolve(self.attributes(vscode[1]), "desktop").reason, "unknown_session")
+        self.assertEqual(snapshot.resolve(self.attributes(desktop, vscode[0]), "desktop").reason,
+                         "unsupported_source")
+        with patch.object(attribution, "desktop_rows", side_effect=AssertionError("not v1")):
+            self.assertEqual(self.resolver.snapshot().resolve(
+                self.attributes(self.alpha[1])).project, "personal/alpha")
+
+    def test_desktop_host_paths_exclusions_and_names_follow_discovery_rules(self) -> None:
+        policy = self.discovery_policy([str(self.root / "projects/private")])
+        root = policy.projects_root
+        root.mkdir()
+        (root / "linked").symlink_to(self.root / "alpha", target_is_directory=True)
+        cases = [
+            (str(root / "personal/deep/alpha"), "github", "personal/alpha", "resolved"),
+            (str(root / "single"), "github", "projects/single", "resolved"),
+            (str(root / "private/alpha"), "github", "unattributed", "unknown_session"),
+            (str(root / "private/child/alpha"), "github", "unattributed", "unknown_session"),
+            (str(self.root / "outside"), "github", "unattributed", "unknown_session"),
+            (str(root / "linked/shared"), "github", "unattributed", "unknown_session"),
+            (str(root), "github", "unattributed", "unknown_session"),
+            (str(root / "personal/remote"), "ssh", "unattributed", "unknown_session"),
+            (str(root / "personal/bad name"), "github", "unattributed", "unsupported_source"),
+            ("relative", "github", "unattributed", "unsupported_source"),
+            ("", "github", "unattributed", "unsupported_source"),
+            (None, "github", "unattributed", "unsupported_source"),
+        ]
+        identities = [self.add_desktop(folder, host) for folder, host, _, _ in cases]
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        for identity, (_, _, project, reason) in zip(identities, cases):
+            with self.subTest(identity=identity):
+                result = snapshot.resolve(self.attributes(identity), "desktop")
+                expected_reason = "lookup_incomplete" if reason == "unknown_session" else reason
+                self.assertEqual((result.project, result.reason), (project, expected_reason))
+
+    def test_desktop_source_uuid_and_global_alias_collisions(self) -> None:
+        policy = self.discovery_policy()
+        root = policy.projects_root
+        self.projects["personal/alpha"] = str(root / "personal/alpha")
+        vscode = self.add_session("personal/alpha")
+        self.add_desktop(str(root / "personal/alpha"), identity=vscode[1])
+        other = self.add_desktop(str(root / "work/two/shared"))
+        self.projects["work/beta"] = str(root / "work/one/shared")
+        conflict = self.add_session("work/beta")
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        attributes = self.attributes(vscode[1])
+        self.assertEqual(snapshot.resolve(attributes).reason, "identity_conflict")
+        for source in ("vscode", "desktop"):
+            self.assertEqual(snapshot.resolve(attributes, source).project, "personal/alpha")
+        for identity, source in ((other, "desktop"), (conflict[1], "vscode")):
+            self.assertEqual(snapshot.resolve(self.attributes(identity), source).reason,
+                             "identity_conflict")
+
+    def test_desktop_missing_schema_lock_and_overflow_fail_without_creating_db(self) -> None:
+        policy = self.discovery_policy()
+        self.desktop.unlink()
+        with self.assertLogs(attribution.LOG, logging.WARNING) as logs:
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertFalse(self.desktop.exists())
+        self.assertEqual(snapshot.resolve(self.attributes(self.alpha[1])).reason, "lookup_failed")
+        self.assertNotIn(str(self.root), "".join(logs.output))
+        with closing(sqlite3.connect(self.desktop)) as db:
+            db.execute("CREATE TABLE sessions (id TEXT, cwd TEXT, host_type TEXT)")
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.unknown_reason, "lookup_failed")
+        with closing(sqlite3.connect(self.desktop)) as db:
+            db.execute("PRAGMA user_version=999")
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.unknown_reason, "lookup_failed")
+        for failure in (sqlite3.OperationalError("locked PRIVATE_PATH"), ValueError("schema")):
+            with patch.object(attribution, "desktop_rows", side_effect=failure):
+                with self.assertLogs(attribution.LOG, logging.WARNING) as logs:
+                    snapshot = attribution.Resolver(policy).snapshot()
+                self.assertEqual(snapshot.unknown_reason, "lookup_failed")
+                self.assertNotIn("PRIVATE_PATH", "".join(logs.output))
+        with closing(sqlite3.connect(self.desktop)) as db:
+            db.execute("PRAGMA user_version=0")
+            db.execute("DROP TABLE sessions")
+            db.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, host_type TEXT)")
+        for _ in range(2):
+            self.add_desktop(str(policy.projects_root / "personal/alpha"))
+        with patch.object(attribution.native, "MAX_SESSIONS", 1):
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.unknown_reason, "lookup_failed")
+
+    def test_desktop_metadata_is_reloaded_and_malformed_ids_are_not_guessed(self) -> None:
+        policy = self.discovery_policy()
+        identity = self.add_desktop(str(policy.projects_root / "personal/alpha"))
+        self.add_desktop(str(policy.projects_root / "personal/alpha"), identity="not-a-uuid")
+        resolver = attribution.Resolver(policy)
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = resolver.snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/alpha")
+        self.assertEqual(snapshot.resolve(self.attributes(str(uuid.uuid4()))).reason, "lookup_incomplete")
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("UPDATE sessions SET cwd=? WHERE id=?",
+                       (str(policy.projects_root / "work/beta"), identity))
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = resolver.snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "work/beta")
 
     def test_discovery_includes_new_projects_but_excludes_directories_and_outside_root(self) -> None:
         root = self.root / "projects"
@@ -360,6 +490,10 @@ class AttributionTests(unittest.TestCase):
 
         class Backend(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
+                if self.path not in ("/v1/traces", "/v1/metrics", "/v1/logs"):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
                 received.append(self.rfile.read(int(self.headers["Content-Length"])))
                 self.send_response(status)
                 if 300 <= status < 400:
@@ -395,6 +529,59 @@ class AttributionTests(unittest.TestCase):
             self.assertEqual(json.load(response), {"partialSuccess": {"rejectedSpans": "1"}})
         self.assertEqual(len(received), 1)
         self.assertIn(b"personal/alpha", received[0])
+
+    def test_source_routes_overwrite_labels_even_for_unresolved_spans_and_rewrite_path(self) -> None:
+        self.policy = self.discovery_policy()
+        desktop = self.add_desktop(str(self.policy.projects_root / "personal/desktop"))
+        base, received, _ = self.gateway()
+        for source, identity, reason in (
+            ("desktop", desktop, "resolved"),
+            ("desktop", str(uuid.uuid4()), "unknown_session"),
+            ("vscode", str(uuid.uuid4()), "unknown_session"),
+            ("unknown", desktop, "resolved"),
+            ("desktop", None, "missing_identity"),
+        ):
+            payload = self.payload(self.attributes(identity) + [
+                {"key": "telemetry.source", "value": {"stringValue": "spoofed"}},
+            ])
+            route = "" if source == "unknown" else f"/{source}"
+            request = urllib.request.Request(
+                base + route + "/v1/traces", data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.opener.open(request, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+            attributes = json.loads(received[-1])["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+            values = {item["key"]: item["value"]["stringValue"] for item in attributes}
+            self.assertEqual(values["telemetry.source"], source)
+            self.assertEqual(values["attribution.reason"], reason)
+            self.assertNotIn("spoofed", json.dumps(attributes))
+        for signal in ("metrics", "logs"):
+            request = urllib.request.Request(
+                base + f"/desktop/v1/{signal}", data=b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            with self.opener.open(request, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+        self.desktop.unlink()
+        request = urllib.request.Request(
+            base + "/desktop/v1/traces",
+            data=json.dumps(self.payload(self.attributes(desktop))).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            with self.opener.open(request, timeout=5) as response:
+                self.assertEqual(response.status, 200)
+        attributes = json.loads(received[-1])["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        values = {item["key"]: item["value"]["stringValue"] for item in attributes}
+        self.assertEqual(values["telemetry.source"], "desktop")
+        self.assertEqual(values["attribution.reason"], "lookup_failed")
+        request = urllib.request.Request(base + "/other/v1/traces", data=b"{}",
+                                         headers={"Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.opener.open(request, timeout=5)
+        self.assertEqual(error.exception.code, 404)
+        error.exception.close()
 
     def test_http_invalid_inputs_and_unsupported_compression_are_not_forwarded(self) -> None:
         base, received, _ = self.gateway()
@@ -551,6 +738,9 @@ class AttributionTests(unittest.TestCase):
             spans[:] = [
                 {**copy.deepcopy(template), "spanId": f"{index + 1:016x}", "attributes": attributes + [
                     {"key": "gen_ai.input.messages", "value": {"stringValue": "PROMPT_MUST_DISAPPEAR"}},
+                    {"key": "enduser.pseudo.id", "value": {"stringValue": "PSEUDO_MUST_DISAPPEAR"}},
+                    {"key": "process.user.name", "value": {"stringValue": "USER_MUST_DISAPPEAR"}},
+                    {"key": "telemetry.source", "value": {"stringValue": "SOURCE_MUST_DISAPPEAR"}},
                     {"key": "project.id", "value": {"stringValue": "spoofed/project"}},
                 ]} for index, attributes in enumerate(identities)
             ]
@@ -559,7 +749,7 @@ class AttributionTests(unittest.TestCase):
             }]}
             for export_index in range(2):
                 request = urllib.request.Request(
-                    f"http://127.0.0.1:{gateway.server_address[1]}/v1/traces",
+                    f"http://127.0.0.1:{gateway.server_address[1]}/vscode/v1/traces",
                     data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"},
                 )
                 with self.opener.open(request, timeout=10) as response:
@@ -575,6 +765,7 @@ class AttributionTests(unittest.TestCase):
                             {"key": "project.id", "value": project},
                             {"key": "attribution.status", "value": {"stringValue": "attributed"}},
                             {"key": "attribution.reason", "value": {"stringValue": "resolved"}},
+                            {"key": "telemetry.source", "value": {"stringValue": "SOURCE_MUST_DISAPPEAR"}},
                         ])
                         request = urllib.request.Request(
                             f"http://127.0.0.1:{ports[1]}/v1/traces",
@@ -583,6 +774,15 @@ class AttributionTests(unittest.TestCase):
                         )
                         with self.opener.open(request, timeout=10) as response:
                             self.assertEqual(response.status, 200)
+            if discover_projects:
+                desktop = self.add_desktop(self.projects["personal/alpha"])
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{gateway.server_address[1]}/desktop/v1/traces",
+                    data=json.dumps(self.payload(self.attributes(desktop))).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.opener.open(request, timeout=10) as response:
+                    self.assertEqual(response.status, 200)
             direct = self.payload(self.attributes(self.alpha[0]) + [
                 {"key": "project.id", "value": {"stringValue": "personal/alpha"}},
                 {"key": "attribution.status", "value": {"stringValue": "attributed"}},
@@ -606,16 +806,21 @@ class AttributionTests(unittest.TestCase):
                     for scope in resource["scopeSpans"] for span in scope["spans"]]
         self.assertNotIn("/Users/private", json.dumps(records))
         self.assertNotIn("name with spaces", json.dumps(records))
-        self.assertEqual(len(exported), 13 if discover_projects else 9)
+        self.assertEqual(len(exported), 14 if discover_projects else 9)
         projects = []
         reasons = []
+        sources = []
         for span in exported:
             attributes = {item["key"]: item["value"] for item in span["attributes"]}
             projects.append(attributes["project.id"]["stringValue"])
+            sources.append(attributes["telemetry.source"]["stringValue"])
             reasons.append(attributes.get("attribution.reason", {}).get("stringValue"))
             self.assertEqual(attributes["accounting.verified"], {"boolValue": False})
             self.assertEqual(span["traceId"], "a" * 32)
-        self.assertEqual(projects.count("personal/alpha"), 2)
+        self.assertEqual(projects.count("personal/alpha"), 3 if discover_projects else 2)
+        self.assertEqual(sources.count("vscode"), 8)
+        self.assertEqual(sources.count("desktop"), 1 if discover_projects else 0)
+        self.assertEqual(sources.count("unknown"), 5 if discover_projects else 1)
         self.assertEqual(projects.count("work/beta"), 2)
         self.assertEqual(projects.count("unattributed"), 9 if discover_projects else 5)
         self.assertEqual(reasons.count("missing_identity"), 2)

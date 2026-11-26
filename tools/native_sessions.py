@@ -37,6 +37,19 @@ def local_path(uri: str) -> Path:
     return Path(unquote(parsed.path)).resolve()
 
 
+def workspace_alias(
+    workspace: Path, root: Path, excluded_workspaces: tuple[Path, ...] = (),
+) -> str | None:
+    workspace, root = workspace.resolve(), root.resolve()
+    if (not workspace.is_relative_to(root)
+            or any(workspace.is_relative_to(excluded.resolve()) for excluded in excluded_workspaces)):
+        return None
+    relative = workspace.relative_to(root).parts
+    if not relative:
+        return None
+    return f"{relative[0]}/{relative[-1]}" if len(relative) >= 2 else f"projects/{relative[0]}"
+
+
 @dataclass(frozen=True)
 class Candidate:
     host_id: str
@@ -102,9 +115,7 @@ def discover(
                 raise CaptureError("source_session_limit_exceeded")
             for row in rows:
                 workspace = local_path(json.loads(row[5])["data"]["project"]["uri"])
-                if (not workspace.is_relative_to(root)
-                        or any(workspace.is_relative_to(excluded_root)
-                               for excluded_root in excluded_workspaces)):
+                if workspace_alias(workspace, root, excluded_workspaces) is None:
                     excluded += 1
                     continue
                 candidates.append(catalog_candidate(row, None, root))
@@ -121,12 +132,9 @@ def catalog_candidate(row: tuple[Any, ...], alias: str | None, path: Path) -> Ca
     data = wrapper["data"]
     if alias is None:
         workspace = local_path(data["project"]["uri"])
-        if not workspace.is_relative_to(path):
-            raise CaptureError("workspace_escaped_approved_root")
-        relative = workspace.relative_to(path).parts
-        if not relative:
-            raise CaptureError("missing_project_folder")
-        alias = f"{relative[0]}/{relative[-1]}" if len(relative) >= 2 else f"projects/{relative[0]}"
+        alias = workspace_alias(workspace, path)
+        if alias is None:
+            raise CaptureError("workspace_outside_approved_root")
         path = workspace
     if (type(revision) is not int
             or type(data.get("isArchived")) is not bool):

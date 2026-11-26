@@ -95,6 +95,7 @@ class NativeCollectorTests(unittest.TestCase):
     def test_query_back_requires_exact_metadata_and_no_content(self) -> None:
         metadata = {
             "telemetry.origin": "synthetic_collector_smoke", "project.id": "synthetic/demo",
+            "telemetry.source": "unknown",
             "attribution.status": "synthetic", "accounting.verified": False,
         }
         spans = ["a" * 16, "b" * 16]
@@ -152,6 +153,8 @@ class NativeCollectorTests(unittest.TestCase):
                 payload = json.loads(request.data)
                 spans = payload["resourceSpans"][0]["scopeSpans"][0]["spans"]
                 spans[0]["attributes"].extend([
+                    {"key": "telemetry.source", "value": {"stringValue": "desktop"}},
+                    {"key": "enduser.pseudo.id", "value": {"stringValue": "PSEUDO_MUST_DISAPPEAR"}},
                     {"key": "gen_ai.operation.name", "value": {"stringValue": "chat"}},
                     {"key": "gen_ai.conversation.id", "value": {"stringValue": "0123456789abcdef0123456789abcdef"}},
                 ])
@@ -211,6 +214,7 @@ class NativeCollectorTests(unittest.TestCase):
             for span in spans:
                 attributes = {item["key"]: item["value"] for item in span["attributes"]}
                 self.assertEqual(span["name"], "copilot.invocation")
+                self.assertEqual(attributes["telemetry.source"], {"stringValue": "unknown"})
                 self.assertFalse(span.get("events"))
                 self.assertFalse(span.get("links"))
                 if span["spanId"] == receipt["span_ids"][0]:

@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from tools.azure_cli import ROOT, azd_value, rest
-from tools.attribution import COLLECTOR_PORT, PROJECT_ALIAS_PATTERN, Policy, REASONS
+from tools.attribution import COLLECTOR_PORT, PROJECT_ALIAS_PATTERN, Policy, REASONS, SOURCES
 
 
 VERSION = "0.165.0"
@@ -77,8 +77,14 @@ def configuration(
         statements = processor["trace_statements"][0]["statements"]
         statements[:0] = [
             f'set(cache["{key}"], attributes["{key}"])'
-            for key in ("project.id", "attribution.status", "attribution.reason")
+            for key in ("project.id", "attribution.status", "attribution.reason", "telemetry.source")
         ]
+        for source in SOURCES:
+            statements.append(
+                f'set(attributes["telemetry.source"], "{source}") '
+                f'where cache["telemetry.source"] == "{source}" '
+                'and cache["origin"] != "synthetic_collector_smoke"'
+            )
         statements.append('set(attributes["attribution.reason"], "invalid_gateway_metadata")')
         for reason in REASONS:
             if reason != "resolved":
@@ -356,6 +362,7 @@ def query_smoke(receipt: Path) -> dict[str, str]:
         raise ValueError("Expected exactly two smoke spans without event rows or duplicates")
     expected_metadata: dict[str, Any] = {
         "telemetry.origin": "synthetic_collector_smoke", "project.id": "synthetic/demo",
+        "telemetry.source": "unknown",
         "attribution.status": "synthetic", "accounting.verified": False,
     }
     for row in rows:

@@ -26,11 +26,13 @@ MAX_BODY = 1024 * 1024
 MAX_SPANS = 10_000
 GATEWAY_PORT = 4319
 COLLECTOR_PORT = 4320
+DESKTOP_CATALOG = Path.home() / ".copilot/session-store.db"
+SOURCES = ("vscode", "desktop", "unknown")
 REASONS = (
     "resolved", "missing_identity", "invalid_identity", "unknown_session",
     "identity_conflict", "unsupported_source", "lookup_incomplete", "lookup_failed",
 )
-ATTRIBUTION_KEYS = {"project.id", "attribution.status", "attribution.reason"}
+ATTRIBUTION_KEYS = {"project.id", "attribution.status", "attribution.reason", "telemetry.source"}
 IDENTITY_KEYS = {"gen_ai.conversation.id", "vscode.agent_host.session.uri"}
 PROJECT_ALIAS_PATTERN = r"[a-zA-Z0-9._-]{1,63}/[a-zA-Z0-9._-]{1,63}"
 
@@ -41,6 +43,7 @@ class Policy:
     projects: dict[str, str] = field(default_factory=dict)
     projects_root: Path | None = None
     excluded_workspaces: tuple[Path, ...] = ()
+    desktop_catalog: Path | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Policy":
@@ -58,7 +61,7 @@ class Policy:
             if any(not item.is_relative_to(root) for item in excluded):
                 raise ValueError("Excluded workspaces must be inside projects_root")
             return cls(Path(value["editor"]).resolve(), projects_root=root,
-                       excluded_workspaces=excluded)
+                       excluded_workspaces=excluded, desktop_catalog=DESKTOP_CATALOG)
         if (not isinstance(value, dict) or type(value.get("version")) is not int
                 or value["version"] != 1
                 or set(value) != {"version", "editor", "projects"}
@@ -98,6 +101,24 @@ def sdk_session_id(editor: Path, host_id: str) -> str:
     return identifier(rows[0][0])
 
 
+def desktop_rows(path: Path) -> list[tuple[Any, ...]]:
+    with closing(native.readonly(path, 0)) as db:
+        columns = {row[1]: (row[2].upper(), row[5])
+                   for row in db.execute("PRAGMA table_info(sessions)")}
+        if (columns.get("id") != ("TEXT", 1)
+                or any(primary for name, (_, primary) in columns.items() if name != "id")
+                or columns.get("cwd", (None,))[0] != "TEXT"
+                or columns.get("host_type", (None,))[0] != "TEXT"):
+            raise ValueError("Unsupported desktop catalog schema")
+        rows = db.execute(
+            "SELECT id, cwd FROM sessions WHERE host_type = 'github' "
+            "ORDER BY id LIMIT ?", (native.MAX_SESSIONS + 1,),
+        ).fetchall()
+    if len(rows) > native.MAX_SESSIONS:
+        raise ValueError("Desktop session limit exceeded")
+    return rows
+
+
 @dataclass(frozen=True)
 class Resolution:
     project: str = "unattributed"
@@ -119,7 +140,7 @@ class Resolver:
         self.policy = policy
 
     def snapshot(self) -> "Snapshot":
-        identities: dict[str, set[tuple[str, str]]] = {}
+        identities: dict[str, set[tuple[str, str, str]]] = {}
         blocked = set()
         incomplete = False
         mappings = {}
@@ -132,25 +153,54 @@ class Resolver:
             workspaces: dict[str, set[Path]] = {}
             for candidate in candidates:
                 workspaces.setdefault(candidate.project_id, set()).add(candidate.workspace)
-            conflicting_projects = {
-                project for project, paths in workspaces.items() if len(paths) > 1
-            }
             for candidate in candidates:
                 if (not candidate.supported
                         or not re.fullmatch(PROJECT_ALIAS_PATTERN, candidate.project_id)
                         or candidate.project_id == "synthetic/demo"):
-                    blocked.add(candidate.host_id)
+                    blocked.add(("vscode", candidate.host_id))
                     incomplete = True
                     continue
                 try:
                     sdk_id = sdk_session_id(self.policy.editor, candidate.host_id)
                 except (OSError, ValueError, sqlite3.Error):
-                    blocked.add(candidate.host_id)
+                    blocked.add(("vscode", candidate.host_id))
                     incomplete = True
                     continue
                 mappings[candidate.host_id] = sdk_id
                 for key in (candidate.host_id, sdk_id):
-                    identities.setdefault(key, set()).add((candidate.host_id, candidate.project_id))
+                    identities.setdefault(key, set()).add(
+                        ("vscode", candidate.host_id, candidate.project_id),
+                    )
+            if self.policy.desktop_catalog is not None:
+                for session_id, cwd in desktop_rows(self.policy.desktop_catalog):
+                    try:
+                        canonical = identifier(session_id)
+                    except (TypeError, ValueError):
+                        incomplete = True
+                        continue
+                    if (canonical != session_id or not isinstance(cwd, str)
+                            or not cwd or not Path(cwd).is_absolute()):
+                        blocked.add(("desktop", canonical))
+                        incomplete = True
+                        continue
+                    workspace = Path(cwd).resolve()
+                    if self.policy.projects_root is None:
+                        raise ValueError("Desktop lookup requires discovery policy")
+                    alias = native.workspace_alias(
+                        workspace, self.policy.projects_root, self.policy.excluded_workspaces,
+                    )
+                    if alias is None:
+                        continue
+                    workspaces.setdefault(alias, set()).add(workspace)
+                    if (not re.fullmatch(PROJECT_ALIAS_PATTERN, alias)
+                            or alias == "synthetic/demo"):
+                        blocked.add(("desktop", canonical))
+                        incomplete = True
+                        continue
+                    identities.setdefault(session_id, set()).add(("desktop", session_id, alias))
+            conflicting_projects = {
+                project for project, paths in workspaces.items() if len(paths) > 1
+            }
             current, _ = native.discover(
                 self.policy.editor, self.policy.projects, 0,
                 projects_root=self.policy.projects_root,
@@ -174,12 +224,12 @@ class Resolver:
 
 @dataclass
 class Snapshot:
-    identities: dict[str, set[tuple[str, str]]]
-    blocked: set[str]
+    identities: dict[str, set[tuple[str, str, str]]]
+    blocked: set[tuple[str, str]]
     unknown_reason: str
     conflicting_projects: set[str] = field(default_factory=set)
 
-    def resolve(self, attributes: list[dict[str, Any]]) -> Resolution:
+    def resolve(self, attributes: list[dict[str, Any]], source: str = "unknown") -> Resolution:
         keys = {}
         try:
             for attribute in attributes:
@@ -204,21 +254,27 @@ class Snapshot:
         if not keys:
             return Resolution()
         matches = []
-        for key in keys.values():
-            if key in self.blocked:
+        for attribute, key in keys.items():
+            if attribute == "vscode.agent_host.session.uri":
+                if source == "desktop":
+                    return Resolution(reason="unsupported_source")
+                allowed = {"vscode"}
+            else:
+                allowed = {"vscode", "desktop"} if source == "unknown" else {source}
+            if any((origin, key) in self.blocked for origin in allowed):
                 return Resolution(reason="unsupported_source")
-            found = self.identities.get(key)
+            found = {match for match in self.identities.get(key, set()) if match[0] in allowed}
             if not found:
                 return Resolution(reason=self.unknown_reason)
             if len(found) != 1:
                 return Resolution(reason="identity_conflict")
             match = next(iter(found))
-            if match[1] in self.conflicting_projects:
+            if match[2] in self.conflicting_projects:
                 return Resolution(reason="identity_conflict")
             matches.append(match)
         if len(set(matches)) != 1:
             return Resolution(reason="identity_conflict")
-        return Resolution(matches[0][1], "resolved")
+        return Resolution(matches[0][2], "resolved")
 
 
 def spans_in(payload: Any) -> list[dict[str, Any]]:
@@ -246,16 +302,20 @@ def spans_in(payload: Any) -> list[dict[str, Any]]:
     return spans
 
 
-def enrich(payload: Any, resolver: Resolver) -> dict[str, int]:
+def enrich(payload: Any, resolver: Resolver, source: str = "unknown") -> dict[str, int]:
+    if source not in SOURCES:
+        raise ValueError("Unsupported telemetry source")
     spans = spans_in(payload)
     snapshot = resolver.snapshot() if spans else Snapshot({}, set(), "unknown_session")
     counts: Counter[str] = Counter()
     for span in spans:
         attributes = span.get("attributes", [])
-        resolution = snapshot.resolve(attributes)
+        resolution = snapshot.resolve(attributes, source)
         span["attributes"] = [
             item for item in attributes if item["key"] not in ATTRIBUTION_KEYS
-        ] + resolution.attributes()
+        ] + resolution.attributes() + [
+            {"key": "telemetry.source", "value": {"stringValue": source}},
+        ]
         counts[resolution.reason] += 1
     return dict(counts)
 
@@ -318,7 +378,12 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(200, b'{"status":"ok","collector":"reachable","cloud_delivery":"not_checked"}')
 
     def do_POST(self) -> None:
-        if self.path not in ("/v1/traces", "/v1/metrics", "/v1/logs"):
+        path, source = self.path, "unknown"
+        for name in ("vscode", "desktop"):
+            if path.startswith(f"/{name}/"):
+                path, source = path.removeprefix(f"/{name}"), name
+                break
+        if path not in ("/v1/traces", "/v1/metrics", "/v1/logs"):
             self.reply(404, b'{"error":"unknown_endpoint"}')
             return
         if (self.headers.get_content_type() != "application/json"
@@ -341,9 +406,9 @@ class Handler(BaseHTTPRequestHandler):
             data = self.rfile.read(length)
             if len(data) != length:
                 raise ValueError("Incomplete body")
-            if self.path == "/v1/traces":
+            if path == "/v1/traces":
                 payload = json.loads(data)
-                counts = enrich(payload, self.server.resolver)
+                counts = enrich(payload, self.server.resolver, source)
                 data = json.dumps(payload, separators=(",", ":"), allow_nan=False).encode()
                 if len(data) > MAX_BODY:
                     self.reply(413, b'{"error":"enriched_body_limit_exceeded"}')
@@ -356,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(408, b'{"error":"request_read_failed"}')
             return
         request = urllib.request.Request(
-            self.server.collector_url + self.path, data=data,
+            self.server.collector_url + path, data=data,
             headers={"Content-Type": "application/json"}, method="POST",
         )
         try:

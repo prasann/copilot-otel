@@ -117,6 +117,41 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("arg_max(TimeGenerated, RunId)", query)
         self.assertIn("Kind == 'standup'", overview[24]["targets"][0]["azureLogAnalytics"]["query"])
 
+    def test_source_filter_preserves_legacy_unknown_and_span_deduplication(self) -> None:
+        variables = {item["name"]: item for item in self.dashboard["templating"]["list"]}
+        self.assertEqual(variables["source"]["current"]["value"], "*")
+        self.assertEqual({item["value"] for item in variables["source"]["options"]},
+                         {"*", "vscode", "desktop", "unknown"})
+        for panel in self.panels:
+            for target in panel.get("targets", []):
+                query = target["azureLogAnalytics"]["query"]
+                with self.subTest(panel=panel["id"]):
+                    if not query.startswith("OTelSpans"):
+                        self.assertNotIn("${source:", query)
+                        continue
+                    dedup = "summarize arg_max(TimeGenerated, *) by TraceId, SpanId"
+                    self.assertIn(dedup + "\n", query)
+                    self.assertIn(
+                        "TelemetrySource=iff(RawSource in ('vscode', 'desktop'), RawSource, 'unknown')",
+                        query,
+                    )
+                    source_filter = ("where ${source:singlequote} == '*' "
+                                     "or TelemetrySource == ${source:singlequote}")
+                    self.assertIn(source_filter, query)
+                    self.assertLess(query.index(dedup), query.index(source_filter))
+                    if "sum(" in query:
+                        self.assertLess(query.index(source_filter), query.index("sum("))
+        panels = {item["id"]: item for item in self.panels}
+        self.assertIn("ProjectId, TelemetrySource,",
+                      panels[5]["targets"][0]["azureLogAnalytics"]["query"])
+        comparison = panels[25]["targets"][0]["azureLogAnalytics"]["query"]
+        self.assertIn("by TelemetrySource", comparison)
+        self.assertIn("InputTokens=iff(countif(isnotnull(InputTokens)) > 0", comparison)
+        self.assertTrue(any(
+            child["id"] == 25 for panel in self.dashboard["panels"]
+            if panel["type"] == "row" and panel["collapsed"] for child in panel["panels"]
+        ))
+
 
 @unittest.skipUnless(shutil.which("az"), "Azure CLI is required for infrastructure tests")
 class InfrastructureTests(unittest.TestCase):

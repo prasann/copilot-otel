@@ -240,8 +240,13 @@ the documented `Microsoft.Dashboard/dashboards/dashboardDefinitions` child resou
 rendering and datasource selection after provisioning changes. See the
 [official export/ARM guidance](https://learn.microsoft.com/azure/azure-monitor/visualize/visualize-use-grafana-dashboards#manage-a-dashboard-as-an-arm-template).
 The project field accepts `*` or an exact project ID and applies to telemetry
-panels. The time picker filters span start and coaching run time; replayed spans
-and resent coaching rows are deduplicated.
+panels. After deploying the updated definition, Telemetry source selects All,
+VS Code, Desktop, or Unknown; raw spans and the collapsed client-source table
+show the configured gateway ingress. Old/unlabelled exports are Unknown and
+remain included under All. This uses `Attributes['telemetry.source']` in the
+existing `OTelSpans` table, not a new table or ingestion schema.
+Coaching is not filtered by client source. The time picker filters span start
+and coaching run time; replayed spans and resent coaching rows are deduplicated.
 
 The baseline uses public TLS endpoints with Entra/RBAC, not private networking.
 It grants data access only to the pilot user; existing inherited subscription/RG
