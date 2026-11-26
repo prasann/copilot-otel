@@ -347,11 +347,14 @@ as described above. Historical Azure records are unchanged.
 
 ```text
 Input tokens | Output tokens | Cache-read tokens | Last observed span
-Observed tokens over time
-Observed tokens by project | Observed tokens by model
 Copilot coaching
-  Most repeated tip theme | Latest tips
-  Tip themes over time    | Latest standup
+  Latest tips (full width)
+  Latest standup (full width)
+  Most repeated tip theme (compact) | Tip themes over time
+Observed tokens over time
+Observed tokens by project
+Observed AIUs and estimated usage value by project
+Observed tokens by model
   > Inspect data: individual spans and client-source comparison
   > Pilot notes: privacy, accounting, and analysis scope
 ```
@@ -364,6 +367,9 @@ Unknown. Both filters apply only to telemetry panels; refresh is five minutes.
 The dashboard definition must be deployed to expose the new source views; local
 code changes do not update the existing Azure dashboard.
 
+- Latest tips and standup have full-width, taller reading rows, wrapped text,
+  compact metadata columns, and flexible detail columns. The repeated-theme
+  card is a small secondary summary beside the theme trend, below both reports.
 - Token cards, trend, and project/model tables sum reported usage from
   deduplicated `chat` spans only. These are **observed tokens, not billing or
   guaranteed complete usage**; transport loss and subagent overlap remain unverified.
@@ -384,6 +390,48 @@ code changes do not update the existing Azure dashboard.
   filtering. Lookbacks are capped at 30 days for spans and 90 days for coaching.
 - The retired `CopilotAssessments_CL` table was deleted from the pilot workspace
   on 24 November 2026; delete it manually in other older workspaces.
+
+### Project cost versus observed usage
+
+The token table shows reported chat usage; the separate AIU table counts
+deduplicated top-level `invoke_agent` observations. **Estimated usage value
+(USD) = observed AIUs x $0.01**, under the explicit modeling assumption
+**1 observed AIU approximately equals 1 billing credit; not billed spend**.
+This bridge is not a verified equivalence. GitHub documents
+[USD 0.01 per AI credit](https://docs.github.com/en/billing/concepts/product-billing/github-copilot-billing);
+the estimate excludes allowances, discounts, invoice reconciliation, Azure
+coaching-model charges, and telemetry ingestion/storage. It does not extrapolate
+unreported usage.
+
+[GitHub's runtime reference](https://docs.github.com/en/copilot/reference/enterprise-administrators/opentelemetry-reference)
+defines `github.copilot.cost` as a model billing multiplier, **not money**.
+`github.copilot.nano_aiu` measures AI units (1 AIU = 1,000,000,000 nano AIU).
+Both fields are retained only when numeric, finite, and nonnegative; integers
+stay integers. Numeric strings, booleans, collections, negative values, NaN,
+and infinity are removed. The finite check uses `value - value == 0`, which
+rejects infinity and NaN without coercing valid integers. Multipliers are
+diagnostic context, never summed as money or used to manufacture missing AIUs.
+
+The collector derives `accounting.scope=top_level` only for `invoke_agent`
+spans with the documented nonempty string `server.address` and integer
+`server.port` in 1-65535. It discards both raw markers before its disk queue
+and upload. Other invocations are `unknown` and excluded, including unmarked
+nested subagents. A parent span ID alone does not distinguish top-level work
+from nested invocations. These are unverified client reports, not authenticated
+billing records; validate each client's marker/AIU semantics before relying on
+its estimate. The reference covers the shared runtime, not VS Code's separate
+Local agent harness. Sources that omit fields/markers remain unavailable.
+
+`EligibleRoots`, `RootsReportingAIUs`, `MissingAIURoots`, and
+`UnclassifiedInvocations` expose coverage alongside each project's partial
+total; `unattributed` stays visible. Missing/all-missing AIUs are unavailable,
+not zero; an explicitly reported zero remains zero. `FirstClassifiedRoot`
+is the first eligible observation within the selected range. Only future
+telemetry retains these fields: reinstall/restart the collector to apply the
+updated filter, then deploy the dashboard. No historic backfill is possible.
+Do not export the same logical invocation through multiple routes: span-ID
+deduplication cannot remove independently generated duplicate spans. The
+dashboard does not claim complete accounting or actual billed spend.
 
 ## Daily Copilot coaching
 

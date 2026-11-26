@@ -152,6 +152,68 @@ class DashboardTests(unittest.TestCase):
             if panel["type"] == "row" and panel["collapsed"] for child in panel["panels"]
         ))
 
+    def test_latest_coaching_has_priority_and_full_width_reading_space(self) -> None:
+        panels = {panel["id"]: panel for panel in self.dashboard["panels"]}
+        tips, standup, theme, trend = (panels[item]["gridPos"] for item in (22, 24, 21, 23))
+        for report in (tips, standup):
+            self.assertEqual((report["x"], report["w"]), (0, 24))
+            self.assertGreaterEqual(report["h"], 12)
+        self.assertLessEqual(tips["y"] + tips["h"], standup["y"])
+        self.assertLessEqual(standup["y"] + standup["h"], theme["y"])
+        self.assertEqual(theme["y"], trend["y"])
+        self.assertLessEqual(theme["w"] * theme["h"], 24)
+        for panel_id in (2, 10, 11):
+            self.assertGreaterEqual(panels[panel_id]["gridPos"]["y"],
+                                    trend["y"] + trend["h"])
+
+    def test_coaching_tables_leave_detail_width_flexible(self) -> None:
+        panels = {panel["id"]: panel for panel in self.dashboard["panels"]}
+        for panel_id, metadata_fields in (
+            (22, {"Rank", "Theme", "Tip", "Generated"}),
+            (24, {"Status", "Repository", "Item"}),
+        ):
+            with self.subTest(panel=panel_id):
+                config = panels[panel_id]["fieldConfig"]
+                self.assertTrue(config["defaults"]["custom"]["wrapText"])
+                widths = {
+                    override["matcher"]["options"]: prop["value"]
+                    for override in config["overrides"]
+                    if override["matcher"]["id"] == "byName"
+                    for prop in override["properties"]
+                    if prop["id"] == "custom.width"
+                }
+                self.assertEqual(set(widths), metadata_fields)
+                self.assertTrue(all(0 < width <= 280 for width in widths.values()))
+                self.assertLessEqual(sum(widths.values()), 660)
+
+    def test_aiu_estimate_counts_reported_roots_without_inventing_missing_usage(self) -> None:
+        panels = {panel["id"]: panel for panel in self.panels}
+        panel = panels[26]
+        query = panel["targets"][0]["azureLogAnalytics"]["query"]
+        operation = "where tostring(Attributes['gen_ai.operation.name']) == 'invoke_agent'"
+        self.assertIn(operation, query)
+        self.assertIn("IsRoot=tostring(Attributes['accounting.scope']) == 'top_level'", query)
+        self.assertLess(query.index(operation), query.index("| summarize EligibleRoots="))
+        self.assertIn("EligibleRoots=countif(IsRoot)", query)
+        self.assertIn("RootsReportingAIUs=countif(IsRoot and isnotnull(NanoAIU))", query)
+        self.assertIn("MissingAIURoots=countif(IsRoot and isnull(NanoAIU))", query)
+        self.assertIn("UnclassifiedInvocations=countif(not(IsRoot))", query)
+        self.assertIn("sumif(NanoAIU, IsRoot and isnotnull(NanoAIU))", query)
+        self.assertIn("isfinite(RawNanoAIU) and RawNanoAIU >= 0", query)
+        self.assertIn(
+            "iff(RootsReportingAIUs > 0 and isfinite(ReportedNanoAIU), "
+            "ReportedNanoAIU / 1000000000.0, real(null))", query,
+        )
+        self.assertIn("['Estimated usage value (USD)']=ObservedAIUs * 0.01", query)
+        self.assertNotIn("github.copilot.cost", query)
+        self.assertNotIn("coalesce(", query)
+        self.assertNotIn("!= 'unattributed'", query)
+        self.assertEqual(panel["fieldConfig"]["defaults"]["noValue"], "Unavailable")
+        note = panels[27]["options"]["content"]
+        self.assertIn("Assumes 1 AIU approximately equals 1 credit; not billed spend", note)
+        self.assertIn("not a verified AIU-to-credit conversion", note)
+        self.assertIn("Excludes allowances, discounts", note)
+
 
 @unittest.skipUnless(shutil.which("az"), "Azure CLI is required for infrastructure tests")
 class InfrastructureTests(unittest.TestCase):

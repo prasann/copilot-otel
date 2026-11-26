@@ -226,6 +226,121 @@ class NativeCollectorTests(unittest.TestCase):
                 else:
                     self.assertFalse(any(key.startswith("gen_ai.") for key in attributes))
 
+    def test_pinned_binary_sanitizes_accounting_on_both_ingress_paths(self) -> None:
+        binary = collector.HOME / collector.BINARY_PATH
+        if not binary.exists():
+            self.skipTest("Pinned collector is not installed; no download performed")
+        values = [
+            ({"intValue": "0"}, True), ({"intValue": "9223372036854775807"}, True),
+            ({"doubleValue": 1.25}, True), ({"doubleValue": 1e200}, True),
+            ({"intValue": "-1"}, False), ({"doubleValue": -0.5}, False),
+            ({"doubleValue": "NaN"}, False), ({"doubleValue": "Infinity"}, False),
+            ({"doubleValue": "-Infinity"}, False),
+            ({"stringValue": "1000"}, False), ({"boolValue": True}, False),
+            ({"arrayValue": {"values": []}}, False), ({"kvlistValue": {"values": []}}, False),
+            (None, False),
+        ]
+        scopes = [
+            ("invoke_agent", {"stringValue": "ROOT_ADDRESS_MUST_DISAPPEAR"},
+             {"intValue": "443"}, "top_level"),
+            ("invoke_agent", None, None, "unknown"),
+            ("invoke_agent", {"stringValue": ""}, {"intValue": "443"}, "unknown"),
+            ("invoke_agent", {"stringValue": "ROOT_ADDRESS_MUST_DISAPPEAR"},
+             {"intValue": "65536"}, "unknown"),
+            ("invoke_agent", {"stringValue": "ROOT_ADDRESS_MUST_DISAPPEAR"},
+             {"stringValue": "443"}, "unknown"),
+            ("chat", {"stringValue": "CHAT_ADDRESS_MUST_DISAPPEAR"},
+             {"intValue": "443"}, None),
+            ("execute_tool", None, None, None),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ports = []
+            for _ in range(2):
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0))
+                    ports.append(listener.getsockname()[1])
+            config = collector.configuration(ENDPOINT, root, discover_projects=True)
+            for receiver, port in zip(("otlp", "otlp/attributed"), ports):
+                config["receivers"][receiver]["protocols"]["http"]["endpoint"] = f"127.0.0.1:{port}"
+            config["extensions"] = {}
+            config["service"]["extensions"] = []
+            config["service"]["telemetry"]["metrics"]["level"] = "none"
+            config["exporters"] = {"file": {"path": str(root / "output.json")}}
+            for pipeline in config["service"]["pipelines"].values():
+                pipeline["exporters"] = ["file"]
+            path = root / "collector.json"
+            path.write_text(json.dumps(config))
+            expected = {}
+            spans = []
+            for value, valid in values:
+                for operation, address, port_value, scope in scopes:
+                    span_id = f"{len(spans) + 1:016x}"
+                    attributes = [
+                        {"key": "gen_ai.operation.name", "value": {"stringValue": operation}},
+                        {"key": "accounting.scope", "value": {"stringValue": "top_level"}},
+                        {"key": "enduser.pseudo.id", "value": {"stringValue": "IDENTITY_MUST_DISAPPEAR"}},
+                    ]
+                    for key, item in (
+                        ("github.copilot.nano_aiu", value), ("github.copilot.cost", value),
+                        ("server.address", address), ("server.port", port_value),
+                    ):
+                        if item is not None:
+                            attributes.append({"key": key, "value": item})
+                    spans.append({
+                        "traceId": "a" * 32, "spanId": span_id,
+                        "parentSpanId": "f" * 16,
+                        "name": "CONTENT_MUST_DISAPPEAR", "kind": 1,
+                        "startTimeUnixNano": str(time.time_ns()), "attributes": attributes,
+                    })
+                    expected[span_id] = (value if valid else None, scope)
+            process = subprocess.Popen(
+                [str(binary), "--config", str(path)], stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                for port in ports:
+                    while True:
+                        if process.poll() is not None:
+                            self.fail(f"Collector failed startup: {process.communicate()[1]}")
+                        try:
+                            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                                break
+                        except OSError:
+                            if time.monotonic() >= deadline:
+                                self.fail("Accounting test receiver did not start")
+                            time.sleep(0.1)
+                    payload = {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{port}/v1/traces",
+                        data=json.dumps(payload).encode(),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        self.assertEqual(response.status, 200)
+            finally:
+                process.terminate()
+                _, errors = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, errors)
+            records = [json.loads(line) for line in (root / "output.json").read_text().splitlines()]
+            self.assertNotIn("MUST_DISAPPEAR", json.dumps(records))
+            exported = [span for record in records for resource in record["resourceSpans"]
+                        for scope in resource["scopeSpans"] for span in scope["spans"]]
+            self.assertEqual(len(exported), len(expected) * 2)
+            for span in exported:
+                value, scope = expected[span["spanId"]]
+                attributes = {item["key"]: item["value"] for item in span["attributes"]}
+                for key in ("github.copilot.nano_aiu", "github.copilot.cost"):
+                    if value is None:
+                        self.assertNotIn(key, attributes)
+                    else:
+                        self.assertEqual(attributes[key], value)
+                self.assertEqual(attributes.get("accounting.scope"),
+                                 {"stringValue": scope} if scope else None)
+                self.assertNotIn("server.address", attributes)
+                self.assertNotIn("server.port", attributes)
+
 
 if __name__ == "__main__":
     unittest.main()

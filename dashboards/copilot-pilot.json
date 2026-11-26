@@ -1,9 +1,9 @@
 {
   "uid": "copilot-reflection-pilot",
   "title": "Copilot telemetry and coaching - pilot",
-  "description": "Observed chat tokens by project, source and model, daily Copilot coaching from Chronicle, and telemetry diagnostics. Not billing or complete usage accounting.",
+  "description": "Observed tokens and root AIUs by project, modeled USD usage value, daily coaching, and telemetry diagnostics. Assumes 1 AIU approximately equals 1 credit at USD 0.01; not billed spend or complete accounting.",
   "schemaVersion": 39,
-  "version": 7,
+  "version": 8,
   "editable": true,
   "timezone": "browser",
   "time": {
@@ -85,7 +85,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Project token usage\nObserved tokens from deduplicated **chat spans only**, filtered by project, configured client source, and time. Agent/tool spans are excluded from token sums to avoid overlapping totals. Cache reads are shown separately, not added to input tokens.\n\nThese are reported observations, **not billing or guaranteed complete usage**. Missing usage is shown in the tables; unresolved projects remain `unattributed`. Daily Copilot coaching follows; raw telemetry is collapsed below.\n\nSource is configured gateway ingress, not authenticated origin. Historical or unlabelled exports are `unknown` and remain included under All. Coaching panels are independent of this filter."
+        "content": "**Observed chat tokens, not billing or complete usage.** Project/source filters apply only to telemetry; cache reads are separate, not extra input. Coaching comes first below; project/model tables and accounting notes follow."
       }
     },
     {
@@ -334,7 +334,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 7,
+        "y": 40,
         "w": 24,
         "h": 8
       },
@@ -401,7 +401,7 @@
       "type": "table",
       "gridPos": {
         "x": 0,
-        "y": 22,
+        "y": 66,
         "w": 24,
         "h": 7
       },
@@ -447,7 +447,7 @@
       "description": "Chat-span observations only, not billing. MissingUsage counts spans without input or output; MissingCache counts spans without cache-read reporting. Unattributed usage is retained separately. Null totals mean no reported value.",
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 48,
         "w": 24,
         "h": 7
       },
@@ -500,18 +500,119 @@
       ]
     },
     {
-      "id": 20,
-      "title": "Copilot coaching",
+      "id": 26,
+      "title": "Observed AIUs and estimated usage value by project",
+      "description": "Assumes 1 AIU approximately equals 1 credit at USD 0.01; not billed spend. Only reported nano-AIU on deduplicated invoke_agent spans with validated top-level server markers is summed. Child chat and unclassified/nested invocations are excluded. Partial coverage is not extrapolated. No historical backfill; source is configured ingress, not authenticated origin.",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${am_ds}"
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "md"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "Unavailable",
+          "custom": {
+            "wrapText": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ProjectId"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 260
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Estimated usage value (USD)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^(EligibleRoots|RootsReportingAIUs|MissingAIURoots|UnclassifiedInvocations)$/"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "Azure Log Analytics",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${am_ds}"
+          },
+          "azureLogAnalytics": {
+            "resources": [
+              "__WORKSPACE_RESOURCE_ID__"
+            ],
+            "dashboardTime": false,
+            "resultFormat": "table",
+            "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend RawSource=tostring(Attributes['telemetry.source'])\n| extend TelemetrySource=iff(RawSource in ('vscode', 'desktop'), RawSource, 'unknown')\n| where ${source:singlequote} == '*' or TelemetrySource == ${source:singlequote}\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| where tostring(Attributes['gen_ai.operation.name']) == 'invoke_agent'\n| extend IsRoot=tostring(Attributes['accounting.scope']) == 'top_level', RawNanoAIU=todouble(Attributes['github.copilot.nano_aiu'])\n| extend NanoAIU=iff(isfinite(RawNanoAIU) and RawNanoAIU >= 0, RawNanoAIU, real(null))\n| summarize EligibleRoots=countif(IsRoot), RootsReportingAIUs=countif(IsRoot and isnotnull(NanoAIU)), MissingAIURoots=countif(IsRoot and isnull(NanoAIU)), UnclassifiedInvocations=countif(not(IsRoot)), ReportedNanoAIU=sumif(NanoAIU, IsRoot and isnotnull(NanoAIU)), FirstClassifiedRoot=minif(TimeGenerated, IsRoot) by ProjectId\n| extend ObservedAIUs=iff(RootsReportingAIUs > 0 and isfinite(ReportedNanoAIU), ReportedNanoAIU / 1000000000.0, real(null))\n| project ProjectId, ObservedAIUs, ['Estimated usage value (USD)']=ObservedAIUs * 0.01, EligibleRoots, RootsReportingAIUs, MissingAIURoots, UnclassifiedInvocations, FirstClassifiedRoot\n| order by ObservedAIUs desc"
+          }
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "title": "Usage estimate assumption",
       "type": "text",
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 55,
         "w": 24,
         "h": 3
       },
       "options": {
         "mode": "markdown",
-        "content": "### Copilot coaching\nDaily `/chronicle tips` and `/chronicle standup` reports from Copilot CLI (VS Code agent sessions included), normalized by the Azure model into short items. Only these derived items are stored here; no prompts, replies, code, or paths. Covers **all projects**; the Project ID filter applies to telemetry panels only."
+        "content": "**Assumes 1 AIU approximately equals 1 credit; not billed spend.** Estimated usage value (USD) = observed root AIUs x $0.01. This is an explicit modeling assumption, not a verified AIU-to-credit conversion. Excludes allowances, discounts, invoice reconciliation and Azure platform/coaching charges. Partial observations only; unavailable is not zero. FirstClassifiedRoot shows first eligible observation in the selected range, not a historical backfill date."
+      }
+    },
+    {
+      "id": 20,
+      "title": "Copilot coaching",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Latest daily reports first; recurring themes below.** Derived from Copilot CLI `/chronicle` reports via the Azure model, not telemetry. Covers **all projects**, independent of Project ID and Telemetry source. The time range still applies."
       }
     },
     {
@@ -521,9 +622,9 @@
       "type": "stat",
       "gridPos": {
         "x": 0,
-        "y": 32,
+        "y": 34,
         "w": 6,
-        "h": 8
+        "h": 4
       },
       "datasource": {
         "type": "grafana-azure-monitor-datasource",
@@ -537,7 +638,10 @@
           ],
           "fields": "/^Focus$/"
         },
-        "textMode": "value_and_name",
+        "textMode": "value",
+        "text": {
+          "valueSize": 20
+        },
         "colorMode": "none",
         "graphMode": "none"
       },
@@ -572,10 +676,10 @@
       "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply.",
       "type": "table",
       "gridPos": {
-        "x": 6,
-        "y": 32,
-        "w": 18,
-        "h": 8
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 12
       },
       "datasource": {
         "type": "grafana-azure-monitor-datasource",
@@ -591,10 +695,60 @@
             "cellOptions": {
               "type": "auto"
             },
-            "wrapText": true
+            "wrapText": true,
+            "minWidth": 50
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Rank"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 55
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Theme"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Tip"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 280
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Generated"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 165
+              }
+            ]
+          }
+        ]
       },
       "targets": [
         {
@@ -622,10 +776,10 @@
       "type": "timeseries",
       "interval": "1d",
       "gridPos": {
-        "x": 0,
-        "y": 40,
-        "w": 10,
-        "h": 9
+        "x": 6,
+        "y": 34,
+        "w": 18,
+        "h": 6
       },
       "datasource": {
         "type": "grafana-azure-monitor-datasource",
@@ -681,10 +835,10 @@
       "description": "Derived from Copilot CLI /chronicle reports via the Azure model. Covers all projects; the Project ID filter does not apply.",
       "type": "table",
       "gridPos": {
-        "x": 10,
-        "y": 40,
-        "w": 14,
-        "h": 9
+        "x": 0,
+        "y": 22,
+        "w": 24,
+        "h": 12
       },
       "datasource": {
         "type": "grafana-azure-monitor-datasource",
@@ -700,10 +854,48 @@
             "cellOptions": {
               "type": "auto"
             },
-            "wrapText": true
+            "wrapText": true,
+            "minWidth": 50
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Status"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Repository"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Item"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 280
+              }
+            ]
+          }
+        ]
       },
       "targets": [
         {
@@ -731,7 +923,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 49,
+        "y": 73,
         "w": 24,
         "h": 1
       },
@@ -742,7 +934,7 @@
           "type": "table",
           "gridPos": {
             "x": 0,
-            "y": 50,
+            "y": 74,
             "w": 24,
             "h": 7
           },
@@ -767,7 +959,7 @@
                 ],
                 "dashboardTime": false,
                 "resultFormat": "table",
-                "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend RawSource=tostring(Attributes['telemetry.source'])\n| extend TelemetrySource=iff(RawSource in ('vscode', 'desktop'), RawSource, 'unknown')\n| where ${source:singlequote} == '*' or TelemetrySource == ${source:singlequote}\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, TelemetrySource, Attribution=tostring(Attributes['attribution.status']), AttributionReason=tostring(Attributes['attribution.reason']), Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
+                "query": "OTelSpans\n| where TimeGenerated > ago(30d)\n| where tostring(Attributes['telemetry.origin']) == 'unverified_client'\n| summarize arg_max(TimeGenerated, *) by TraceId, SpanId\n| where $__timeFilter(TimeGenerated)\n| extend RawSource=tostring(Attributes['telemetry.source'])\n| extend TelemetrySource=iff(RawSource in ('vscode', 'desktop'), RawSource, 'unknown')\n| where ${source:singlequote} == '*' or TelemetrySource == ${source:singlequote}\n| extend ProjectId=tostring(Attributes['project.id'])\n| where ${project:singlequote} == '*' or ProjectId == ${project:singlequote}\n| project TimeGenerated, ProjectId, TelemetrySource, Attribution=tostring(Attributes['attribution.status']), AttributionReason=tostring(Attributes['attribution.reason']), Operation=tostring(Attributes['gen_ai.operation.name']), Model=tostring(Attributes['gen_ai.response.model']), InputTokens=tolong(Attributes['gen_ai.usage.input_tokens']), OutputTokens=tolong(Attributes['gen_ai.usage.output_tokens']), CacheReadTokens=tolong(Attributes['gen_ai.usage.cache_read.input_tokens']), AccountingScope=tostring(Attributes['accounting.scope']), NanoAIU=todouble(Attributes['github.copilot.nano_aiu']), ModelMultiplier=todouble(Attributes['github.copilot.cost']), DurationMs, TraceId, SpanId\n| order by TimeGenerated desc\n| take 100"
               }
             }
           ]
@@ -779,7 +971,7 @@
           "type": "table",
           "gridPos": {
             "x": 0,
-            "y": 57,
+            "y": 81,
             "w": 24,
             "h": 7
           },
@@ -827,7 +1019,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 74,
         "w": 24,
         "h": 1
       },
@@ -838,7 +1030,7 @@
           "type": "text",
           "gridPos": {
             "x": 0,
-            "y": 51,
+            "y": 75,
             "w": 12,
             "h": 8
           },
@@ -853,7 +1045,7 @@
           "type": "text",
           "gridPos": {
             "x": 12,
-            "y": 51,
+            "y": 75,
             "w": 12,
             "h": 8
           },
