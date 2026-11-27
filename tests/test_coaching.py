@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
 from tools import coaching
 
 
@@ -96,6 +99,47 @@ class CoachingTests(unittest.TestCase):
         with patch.object(coaching.subprocess, "run", return_value=completed):
             with self.assertRaisesRegex(coaching.CoachingError, "possible_secret"):
                 coaching.chronicle("tips", self.root, self.config)
+
+    def test_model_schema_enforces_local_item_constraints(self) -> None:
+        validator = Draft202012Validator(coaching.MODEL_SCHEMA)
+        validator.check_schema(coaching.MODEL_SCHEMA)
+        validator.validate({"items": ITEMS})
+        boundary = [{**ITEMS[0], "title": "x" * 160, "detail": "x" * 400,
+                     "repository": "x" * 100}] * coaching.MAX_ITEMS
+        validator.validate({"items": boundary})
+        coaching.ITEMS.validate(boundary)
+        invalid = [
+            ([], "minItems"),
+            ([ITEMS[0]] * (coaching.MAX_ITEMS + 1), "maxItems"),
+            ([{**ITEMS[1], "repository": "Project label"}], "pattern"),
+            ([{**ITEMS[0], "title": ""}], "minLength"),
+            ([{**ITEMS[0], "title": "x" * 161}], "maxLength"),
+            ([{**ITEMS[0], "detail": "x" * 401}], "maxLength"),
+            ([{**ITEMS[1], "repository": "x" * 101}], "maxLength"),
+        ]
+        for items, rule in invalid:
+            with self.subTest(rule=rule, count=len(items)):
+                for validate, value in ((validator.validate, {"items": items}),
+                                        (coaching.ITEMS.validate, items)):
+                    with self.assertRaises(ValidationError) as caught:
+                        validate(value)
+                    self.assertEqual(caught.exception.validator, rule)
+
+    def test_schema_failure_diagnostics_are_saved_without_rejected_content(self) -> None:
+        rejected = "Private project label"
+        result, calls = self.execute([{**ITEMS[1], "repository": rejected}])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"],
+                         "Item schema validation failed at items[0].repository (pattern)")
+        saved = self.root / "results" / f"{result['run_id']}.json"
+        diagnostic = json.loads(saved.read_text())
+        self.assertEqual(diagnostic["reason"], result["reason"])
+        self.assertEqual(diagnostic["chronicle_ai_credits"], 17.0)
+        self.assertNotIn(rejected, saved.read_text())
+        self.assertNotIn("items", diagnostic)
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(any((self.root / "receipts").iterdir()))
+        self.assertEqual(len(calls), 1)
 
     def test_chronicle_runs_read_only_capped_and_unsynced(self) -> None:
         self.root.mkdir(parents=True)
