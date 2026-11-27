@@ -66,6 +66,18 @@ checkout. Repository subdirectories roll up to that primary; nested independent
 repositories stay independent. Non-Git directories keep the previous
 workspace-based alias. Version 1's explicit allowlist is unchanged.
 
+For Git repositories, derive the alias from the canonical primary checkout:
+the first folder under `projects_root` is the category and the checkout's final
+folder is the project name. For example, `personal/apps/demo` and its registered
+worktrees share `personal/demo`; a direct root child uses `projects/<name>`.
+This repository rollup supersedes workspace-folder naming for Git projects only.
+Directory names and remote URLs never establish repository ownership.
+
+Excluding the primary checkout excludes all its worktrees; excluding one
+worktree or session subdirectory leaves its siblings eligible. These are
+attribution exclusions, not collection exclusions: incoming spans still pass
+through as `unattributed`. Raw paths/config values are not exported or logged.
+
 For an unexpected `unattributed` result, check the following privately:
 
 - The session directory must still exist. A removed worktree or stale catalog
@@ -103,6 +115,11 @@ overflow fails with `lookup_failed`; it is never silently truncated. Repeated
 workspaces share reads only within a batch. Records without a local `file:///`
 project URI (including remote or unscoped sessions) remain ineligible and are not
 treated as broken local Git metadata.
+
+Git resolution reads only bounded filesystem metadata, never executes Git,
+hooks, global config, or network lookups. Each export starts fresh, with no
+cross-export cache. Limits are 64 ancestor steps per workspace, 64 KiB per
+metadata file, and 8 MiB of metadata reads per export; overflow fails closed.
 
 Deploy only the updated gateway runtime and restart that gateway when approved.
 Keep the collector/dashboard/source/AIU configuration unchanged; health checks

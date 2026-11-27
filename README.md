@@ -187,34 +187,22 @@ paths; JSON values do not expand `~` or environment variables):
 }
 ```
 
-Eligible workspaces in either catalog are discovered automatically on each
-export, without registering new projects or reinstalling the collector.
-For `/Users/prasanna/projects`, a project beneath
+Local workspaces in either catalog beneath `projects_root` are
+discovered automatically on each export, without registering new projects or
+reinstalling the collector. For `/Users/prasanna/projects`, a workspace beneath
 `personal/copilot-otel` gets alias `personal/copilot-otel`, and one beneath
 `msft/scb/COIN_AI_SDK` gets `msft/COIN_AI_SDK`. The first folder beneath the root
-is the category and the canonical project's final folder is the project name;
-intermediate folders are ignored. Conventional Git primary checkouts, their
-registered linked worktrees, and ordinary repository subdirectories share the
-primary checkout's alias. A nested independent repository remains a separate
-project. A worktree outside `projects_root` is eligible only when reciprocal Git
-registration links verify an eligible primary checkout inside the root; directory
-names and remote URLs are never used to guess ownership.
-
-Existing non-Git directories retain workspace-based naming, including subfolder
-names. Projects directly beneath the root use `projects/folder-name`.
-Distinct repositories or non-Git workspace paths with the same alias remain
-unattributed with `identity_conflict`, rather than combining unrelated projects.
-Multiple sessions and registered worktrees of one repository are allowed.
+is the category and the workspace's final folder is the project name;
+intermediate folders are ignored. Opening a project's subfolder as the workspace
+uses that subfolder's name, not the enclosing project's name. Workspaces directly
+beneath the root use `projects/folder-name`. Distinct discovered workspace paths
+with the same alias remain unattributed with `identity_conflict`, rather than
+combining unrelated projects. Multiple sessions in the same workspace are allowed.
 Aliases must contain two components of 1-63 ASCII letters, digits, dots,
 underscores, or hyphens. Unsupported names remain unattributed; `synthetic/demo`
 is reserved. Raw absolute paths are not exported, but category and project names are.
 Add absolute directory paths to `excluded_workspaces` to exclude them and all
-descendants. Exclusions apply to the actual session directory, its checkout root,
-and the canonical primary checkout. Excluding the primary excludes all its
-worktrees; excluding one worktree leaves its siblings eligible. Outside-root
-absolute exclusions are supported for external worktree storage. Paths are
-resolved, and an ordinary symlink escaping the root cannot gain eligibility
-through worktree canonicalization.
+descendants. Paths are resolved, so symlinks escaping the root are not eligible.
 These are **attribution exclusions**, not collection exclusions: incoming spans
 still pass through as `unattributed`. Enabling telemetry remains a separate,
 explicit client configuration; keep content capture off.
@@ -225,28 +213,6 @@ Attribution policy is independent of coaching and enables no model calls. Existi
 **new incoming spans**; no old telemetry or conversation history is replayed.
 After updating the gateway code, restart it to use the new naming rule.
 Historical records retain their original aliases.
-
-Git resolution uses bounded, read-only local filesystem metadata, never a Git
-subprocess, hooks, global config, or network lookup. Metadata and Git config
-values are not exported or logged. Only user-owned metadata files/directories
-without group/other write permission are accepted. There is no cross-export
-cache: each export gets fresh reads, with snapshot-local reuse and consistency
-checks. The catalogs are bounded at 1,000 candidates each **before** root
-filtering, including unrelated local VS Code workspaces. VS Code records without
-a local `file:///` project URI remain ineligible, as before. Metadata is bounded at 64
-ancestor steps per workspace, 64 KiB per file, and 8 MiB read per export; an
-overflow or inconsistent registration fails closed, never truncates.
-
-Initial Git support intentionally excludes bare-common-directory worktrees,
-separate-git-dir layouts, absorbed submodule gitfiles, config includes,
-`core.worktree` overrides, and worktree-specific configuration. These remain
-unattributed instead of falling back to a guessed parent. Missing session
-directories remain `lookup_incomplete`; corrupt or concurrently changed
-registration makes the batch `lookup_failed`. See
-[worktree troubleshooting](docs/troubleshooting.md#git-worktree-project-rollup).
-To roll out this resolver change, update the installed gateway code and restart
-only the gateway. Keep the existing collector, source routes, dashboard, and
-AIU/root-accounting configuration; only future `project.id` grouping changes.
 
 After reviewing that scope, start the pipeline:
 
