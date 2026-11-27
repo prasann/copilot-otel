@@ -24,8 +24,11 @@ default read-only session tools.
 
 Reports containing private-key or GitHub/AWS token patterns stop before the Azure
 call. Items are rejected unless they match the schema: a fixed category, a title
-up to 160 characters, a detail up to 400 characters, and an empty or `owner/repo`
-repository. Newlines, code fences, local paths, and secret patterns fail the run.
+up to 160 characters, a detail up to 400 characters, and an empty, `owner/repo`,
+or single-slug repository. Project labels with spaces are left unattributed rather
+than converted to guessed repository names. The model's strict schema uses the same
+length, count, and repository constraints as local validation.
+Newlines, code fences, local paths, and secret patterns fail the run.
 Nothing is published from a failed run.
 
 ## Setup
@@ -82,6 +85,13 @@ the validated rows without spending more credits:
 Dashboard queries deduplicate by `RunId`, `Kind`, and `Rank`, so a resend that
 overlaps an earlier accepted upload does not double-count.
 
+For an item-schema failure, the returned reason and local result identify the
+item index, field, and failed schema rule without retaining the rejected content.
+No upload receipt exists for such a failure, so `publish` cannot recover it;
+after fixing the cause, `run --execute --retry` requires a new paid attempt.
+Older failures reported only `ValidationError` and did not retain the model
+response, so their exact rejected values cannot be recovered from local state.
+
 ## Local state and retention
 
 State lives in `~/Library/Application Support/copilot-otel/coaching` (mode 0700):
@@ -89,7 +99,7 @@ State lives in `~/Library/Application Support/copilot-otel/coaching` (mode 0700)
 | Path | Content | Kept |
 | --- | --- | --- |
 | `reports/` | Raw Chronicle reports | 30 days |
-| `results/` | Validated items, credits, model token usage | 90 days |
+| `results/` | Validated items, credits, model token usage; content-free item-schema failure diagnostics | 90 days |
 | `receipts/` | Exact rows sent and their upload status | 90 days |
 | `runs.db` | One row per attempt | 90 days |
 | `worker.log` | Scheduled-run JSON output (no report text) | Not rotated |
