@@ -1,18 +1,19 @@
 # Troubleshooting
 
-Use real sessions as the primary end-to-end acceptance evidence. Check local
-service status, client endpoints, attribution reasons, and Azure query-back
-before generating test traffic. A reachable collector or gateway does not prove
-Azure delivery; historical dashboard rows do not prove current service health.
+Check local services, client endpoints, attribution reasons, and Azure
+query-back before generating test traffic. A reachable collector or gateway
+does not prove Azure delivery; old dashboard rows do not prove current health.
 
-For attribution, follow the [client configuration and restart instructions](../README.md#connect-vs-code-insiders)
-and [gateway checks](../README.md#project-attribution-with-exclusions). Some spans have no
+## Attribution
+
+Follow the [client configuration and restart instructions](telemetry.md#connect-vs-code-insiders)
+and [gateway checks](telemetry.md#project-attribution-with-exclusions). Some spans have no
 session identity and correctly remain `unattributed` with `missing_identity`.
 Do not guess their project from the active workspace, timestamps, or parent trace.
 
-### Desktop and client-source attribution
+### Client-source attribution
 
-Version-2 discovery now reads both the configured VS Code catalog and the local
+Version-2 discovery reads both the configured VS Code catalog and the local
 desktop `~/.copilot/session-store.db`, using the same root/exclusions. Neither
 source requires registering projects. Exclusions prevent project attribution,
 not telemetry collection.
@@ -20,8 +21,8 @@ not telemetry collection.
 Use `/vscode/v1/traces` or `/desktop/v1/traces` on gateway 4319 for a configured
 `telemetry.source` label. The source label remains present when project lookup
 fails. It is not authenticated origin or evidence that the ID was found.
-Unprefixed exports and direct 4318 exports use `unknown`; historical missing
-source values also show as Unknown in Grafana. Do not relabel old rows as VS Code.
+Unprefixed exports and direct 4318 exports use `unknown`; missing source values
+also show as Unknown in Grafana. Do not relabel those rows as VS Code.
 An All source filter retains them in totals; coaching ignores that filter.
 
 `unknown_session` means no eligible exact ID match. The desktop workspace UUID
@@ -39,7 +40,9 @@ collisions could otherwise be concealed. It never creates a missing catalog.
 `unsupported_source` can identify a malformed known row; `lookup_incomplete`
 warns that some metadata cannot be used. No database or payload paths are logged.
 
-For desktop activation follow the [direct executable launch](../README.md#connect-the-desktop-app).
+### Desktop launch and delivery
+
+Follow the [direct executable launch](telemetry.md#connect-the-desktop-app).
 Fully quit the existing app first; a second launch does not update the current
 runtime's variables. Check selected OTel variables only, never dump the whole
 process environment or logs containing credentials/content. Public current
@@ -49,12 +52,12 @@ HTTP 415 means the gateway requires uncompressed `application/json`, not
 protobuf/gzip. Per-signal endpoint/protocol/compression variables take precedence
 over global ones; point all enabled signals to the local gateway.
 
-Keep `NO_CONTENT` and the legacy message-content switch off. Pseudonymous
-identity may still be emitted; the collector's allowlist strips it before the
-queue/cloud. Source-prefix routes require the updated gateway, and preserving
+Keep content capture at `NO_CONTENT` and the legacy message-content switch
+false. Pseudonymous identity may still be emitted; the collector's allowlist
+strips it before the queue/cloud. Source-prefix routes require the updated gateway, and preserving
 source requires reinstalling the stopped collector with the same policy.
-The source-aware dashboard JSON also needs deployment; none of those steps
-is implied by a local `/health` success.
+Dashboard changes also need deployment; none of those steps is implied by a
+local `/health` success.
 
 ## Manual synthetic diagnostics
 
@@ -75,7 +78,7 @@ With the native collector already installed and running:
 ```bash
 .venv/bin/python -m tools.native_collector smoke
 .venv/bin/python -m tools.native_collector query-smoke \
-  --receipt <receipt-file-from-smoke-output>
+  <receipt-file-from-smoke-output>
 ```
 
 The first command sends two explicitly tagged synthetic canary spans to the
@@ -87,7 +90,10 @@ Do not inject synthetic spans carrying real session identities through the
 attribution gateway: they can be classified as real activity and pollute the
 normal dashboard.
 
-### Daily coaching
+Normal activity panels exclude explicitly tagged smoke records. Inspect these
+through query-back and let them expire under Azure retention (30 days for spans).
+
+## Daily coaching
 
 Check `.venv/bin/python -m tools.coaching status` first; it lists recent runs,
 their status, and Copilot credits. Scheduled output goes to `worker.log` in the
@@ -97,7 +103,7 @@ coaching state folder. Failures report a fixed reason, never report text:
 | --- | --- | --- |
 | `chronicle_<kind>_failed_exit_N` | Copilot CLI failed (sign-in, flags, credit cap) | Run `copilot -p "/chronicle tips" -s` manually |
 | `chronicle_<kind>_possible_secret` | A secret pattern appeared in the report | Nothing was saved or sent to Azure; run the Chronicle command manually to find the source session |
-| `Item contains disallowed content` / `ValidationError` | Model output failed validation | Inspect the report; retry tomorrow or with `--retry` |
+| `Item contains disallowed content` / `ValidationError` | Model output failed validation | Inspect the content-free item/schema diagnostics in the local result; see [upload recovery](coaching.md#recovering-a-failed-upload) |
 | `RuntimeError` with a `results/` file present | Upload failed after a valid result | `tools.coaching publish <run-id>` |
 | `RuntimeError` with reports but no result | Azure model request failed before a validated result was saved | Check Azure sign-in and TLS connectivity; do not rerun Chronicle just to test connectivity |
 
@@ -111,12 +117,3 @@ verification as a workaround.
 After reprovisioning, re-run `tools.coaching enable --execute` so the cached
 ingestion IDs are current. A newly changed ingestion rule can reject uploads with
 `InvalidStream` for several minutes.
-
-### Existing synthetic data
-
-Normal dashboard queries exclude explicitly tagged collector smoke records.
-Inspect these through their diagnostic query-back command, not the normal
-activity panels. Let existing records expire under Azure retention (30 days for
-spans). Older workspaces may still contain the retired `CopilotAssessments_CL`
-table; nothing reads it, so delete it with
-`az monitor log-analytics workspace table delete`.

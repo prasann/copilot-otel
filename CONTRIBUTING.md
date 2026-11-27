@@ -35,8 +35,12 @@ or telemetry payloads containing content.
    .venv/bin/python -m unittest discover -s tests
    az bicep lint --file infra/main.bicep
    ```
-   See [the README](README.md#try-it-locally) for dependencies and conditional
-   tests. For infrastructure changes, review `azd provision --preview` in a
+   See [the README](README.md#get-started) for Python dependencies. Tests use
+   fixtures and mocks: they do not read real history, call models, upload data,
+   or install services. Infrastructure tests compile Bicep when Azure CLI and
+   its Bicep compiler are available; native-binary privacy and attribution
+   tests run only when the pinned collector is installed.
+   For infrastructure changes, review `azd provision --preview` in a
    disposable environment before any explicitly approved deployment. Tests do
    not require cloud provisioning or model calls.
 4. Open a pull request against `main` with a clear description of what changes

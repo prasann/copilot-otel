@@ -3,9 +3,12 @@
 The coaching worker turns Copilot CLI's own session analysis into dashboard rows.
 It never reads conversation files itself.
 
-```text
-copilot -p "/chronicle tips"     ─┐
-copilot -p "/chronicle standup"  ─┴─► local reports ─► Azure model ─► validated items ─► CopilotInsights_CL
+```mermaid
+flowchart LR
+  Chronicle["Copilot CLI /chronicle<br/>tips + standup"] --> Reports["Local reports"]
+  Reports --> Model["Your Azure model"]
+  Model --> Items["Local validation"]
+  Items --> Azure["Log Analytics"]
 ```
 
 ## Data boundaries
@@ -15,6 +18,10 @@ copilot -p "/chronicle standup"  ─┴─► local reports ─► Azure model �
 | `/chronicle tips`, `/chronicle standup` | Copilot's local session store (`~/.copilot/session-store.db`), including VS Code Agent Host sessions | Copilot's model service, which already holds those sessions |
 | Normalization | Only the two Chronicle reports (~1-2 KB each) | Your Azure OpenAI deployment (`store: false`, strict JSON schema, 2,000 output tokens) |
 | Publishing | Validated items only | Log Analytics `CopilotInsights_CL` via the insights ingestion rule |
+
+Derived reports can still contain sensitive information. Pattern checks reduce
+accidental exposure but do not guarantee anonymization. Local raw reports need
+the same care as other session-derived material.
 
 Chronicle runs non-interactively with `-s`, `--no-ask-user`,
 `--no-custom-instructions`, `--disable-builtin-mcps`, `--sync-session=off`, and
@@ -33,8 +40,7 @@ Nothing is published from a failed run.
 
 ## Setup
 
-1. Provision the current infrastructure (`azd provision`) so the `INSIGHTS_*`
-   outputs exist.
+1. Follow [Azure setup](azure-setup.md) so the `INSIGHTS_*` outputs exist.
 2. Fill the Azure model settings in `.env` from `.env.example`.
 3. Sign in to `copilot`, `az`, and `azd`.
 
@@ -43,6 +49,7 @@ Nothing is published from a failed run.
 .venv/bin/python -m tools.coaching run --execute
 .venv/bin/python -m tools.coaching verify <run-id>
 .venv/bin/python -m tools.coaching install --execute
+.venv/bin/python -m tools.coaching status
 ```
 
 `enable` caches the ingestion endpoint, rule, and workspace IDs in the local policy
@@ -67,15 +74,17 @@ defers the first scheduled run to the next 09:00. The job does not wake the Mac.
 
 - One attempt per local day, scheduled or manual. A failed attempt is not retried
   automatically; `run --execute --retry` spends another attempt deliberately.
-- Each Chronicle call is capped at 30 Copilot AI credits; the first real run used
-  about 10 credits for both reports. `status` shows recorded credits per run.
-- One Azure model call per run (about 800 input and 1,100 output tokens observed).
+- Two Chronicle calls per run, each capped at 30 Copilot AI credits.
+  `status` shows recorded credits per run.
+- One Azure model call per run. Actual credit and token usage varies.
+
+Successful delivery does not establish useful advice. Review recurring themes
+against your own work before treating them as habits to change.
 
 ## Recovering a failed upload
 
-If Chronicle and the model succeeded but the upload failed (for example, a rule
-change still propagating, which took about 7 minutes after provisioning), resend
-the validated rows without spending more credits:
+If Chronicle and the model succeeded but the upload failed, resend the validated
+rows without spending more credits:
 
 ```bash
 .venv/bin/python -m tools.coaching publish <run-id>
@@ -89,8 +98,6 @@ For an item-schema failure, the returned reason and local result identify the
 item index, field, and failed schema rule without retaining the rejected content.
 No upload receipt exists for such a failure, so `publish` cannot recover it;
 after fixing the cause, `run --execute --retry` requires a new paid attempt.
-Older failures reported only `ValidationError` and did not retain the model
-response, so their exact rejected values cannot be recovered from local state.
 
 ## Local state and retention
 
