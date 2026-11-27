@@ -22,6 +22,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Generator
+from zoneinfo import ZoneInfo
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
@@ -41,6 +42,8 @@ OUTPUT_TOKENS = 2000
 MAX_ITEMS = 16
 STREAM = "Custom-CopilotInsightInput"
 TABLE = "CopilotInsights_CL"
+STATUS_STREAM = "Custom-CopilotCoachingRunInput"
+COACHING_ZONE = ZoneInfo("Asia/Kolkata")
 THEMES = [
     "verification", "planning", "context_and_resume", "prompt_clarity",
     "feature_usage", "documentation", "cost_efficiency", "privacy", "other",
@@ -69,7 +72,7 @@ people's names, or quotations of prompts. Do not invent items. At most {MAX_ITEM
 MODEL_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["items"],
     "properties": {"items": {
-        "type": "array", "minItems": 1, "maxItems": MAX_ITEMS,
+        "type": "array", "minItems": 0, "maxItems": MAX_ITEMS,
         "items": {
             "type": "object", "additionalProperties": False,
             "required": ["kind", "category", "title", "detail", "repository"],
@@ -118,7 +121,7 @@ def locked(root: Path) -> Generator[sqlite3.Connection, None, None]:
         raise CoachingError("Use a dedicated, non-symlinked coaching directory")
     root.mkdir(parents=True, mode=0o700, exist_ok=True)
     root.chmod(0o700)
-    for name in ("reports", "results", "receipts", "cwd"):
+    for name in ("reports", "results", "receipts", "signals", "cwd"):
         directory = root / name
         if directory.is_symlink():
             raise CoachingError("Refusing symlinked coaching storage")
@@ -141,7 +144,7 @@ def locked(root: Path) -> Generator[sqlite3.Connection, None, None]:
 
 
 def prune(root: Path, db: sqlite3.Connection, now: float) -> None:
-    for directory, days in (("reports", 30), ("results", 90), ("receipts", 90)):
+    for directory, days in (("reports", 30), ("results", 90), ("receipts", 90), ("signals", 90)):
         for path in (root / directory).iterdir():
             if path.is_file() and now - path.stat().st_mtime >= days * DAY:
                 path.unlink()
@@ -180,6 +183,9 @@ def configure(root: Path, env_file: Path, copilot: str | None) -> dict[str, Any]
         "rule": rule, "workspace": workspace,
         "schedule_after": previous.get("schedule_after"),
     }
+    for key in ("status_endpoint", "status_rule"):
+        if previous.get(key):
+            value[key] = previous[key]
     atomic_json(root / "policy.json", value)
     return value
 
@@ -260,10 +266,37 @@ def records(
 def publish(config: dict[str, Any], rows: list[dict[str, Any]], receipt: Path) -> None:
     envelope = {"status": "attempting", "rows": rows}
     atomic_json(receipt, envelope)
-    rest(f"{config['ingestion_endpoint']}/dataCollectionRules/{config['rule']}"
-         f"/streams/{STREAM}?api-version=2023-01-01", "https://monitor.azure.com", rows)
+    if rows:
+        rest(f"{config['ingestion_endpoint']}/dataCollectionRules/{config['rule']}"
+             f"/streams/{STREAM}?api-version=2023-01-01", "https://monitor.azure.com", rows)
     envelope["status"] = "accepted_not_yet_query_verified"
     atomic_json(receipt, envelope)
+
+
+def signal(
+    root: Path, config: dict[str, Any], run_id: str, created: float,
+    status: str, expected: int, completed: float | None = None,
+) -> dict[str, str]:
+    if not config.get("status_endpoint") or not config.get("status_rule"):
+        return {}
+    row = {
+        "TimeGenerated": datetime.fromtimestamp(
+            time.time() if completed is None else completed, COACHING_ZONE).isoformat(),
+        "RunId": str(uuid.UUID(run_id)),
+        "RunDay": datetime.fromtimestamp(created, COACHING_ZONE).date().isoformat(),
+        "Status": status, "ExpectedItems": expected,
+    }
+    path = root / "signals" / f"{run_id}.json"
+    try:
+        atomic_json(path, {"status": "pending", "row": row})
+        rest(f"{config['status_endpoint']}/dataCollectionRules/{config['status_rule']}"
+             f"/streams/{STATUS_STREAM}?api-version=2023-01-01",
+             "https://monitor.azure.com", [row])
+        atomic_json(path, {"status": "accepted", "row": row})
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        return {"status_warning": f"Completion signal pending ({type(error).__name__}); "
+                "status email will not claim receipt without it"}
+    return {}
 
 
 def run(
@@ -308,7 +341,8 @@ def run(
         publish(config, rows, root / "receipts" / f"{run_id}.json")
         status = "published"
         return {"status": status, "run_id": run_id, "items": len(rows),
-                "chronicle_ai_credits": credits}
+                "chronicle_ai_credits": credits,
+                **signal(root, config, run_id, now, status, len(rows))}
     except (OSError, ValueError, KeyError, TypeError, RuntimeError,
             subprocess.SubprocessError, ValidationError) as error:
         # Provider and CLI messages can echo report content, so only controlled reasons surface.
@@ -326,7 +360,8 @@ def run(
             })
         else:
             reason = str(error) if isinstance(error, CoachingError) else type(error).__name__
-        return {"status": "failed", "run_id": run_id, "reason": reason}
+        return {"status": "failed", "run_id": run_id, "reason": reason,
+                **signal(root, config, run_id, now, "failed", 0)}
     finally:
         db.execute("UPDATE runs SET status=?, credits=? WHERE id=?", (status, credits, run_id))
         db.commit()
@@ -340,11 +375,15 @@ def republish(
     envelope = json.loads(receipt.read_text())
     if envelope["status"] != "attempting":
         raise CoachingError("Run was already accepted; use verify instead")
+    created = db.execute("SELECT created_at FROM runs WHERE id=?", (identifier,)).fetchone()
+    if created is None:
+        raise CoachingError("Run is not present in the local database")
     # Dashboard queries deduplicate by RunId/Kind/Rank, so resending validated rows is safe.
     publish(config, envelope["rows"], receipt)
     db.execute("UPDATE runs SET status='published' WHERE id=?", (identifier,))
     db.commit()
-    return {"status": "published", "run_id": identifier, "items": len(envelope["rows"])}
+    return {"status": "published", "run_id": identifier, "items": len(envelope["rows"]),
+            **signal(root, config, identifier, created[0], "published", len(envelope["rows"]))}
 
 
 def verify(config: dict[str, Any], root: Path, run_id: str) -> dict[str, Any]:
@@ -360,13 +399,75 @@ def verify(config: dict[str, Any], root: Path, run_id: str) -> dict[str, Any]:
     )
     rows, distinct = result["tables"][0]["rows"][0]
     expected = len(envelope["rows"])
-    if rows == 0:
+    if rows == 0 and expected:
         return {"status": "not_yet_visible", "expected_rows": expected}
     if distinct != expected:
         raise CoachingError("Stored rows differ from the published receipt")
     envelope["status"] = "query_verified"
     atomic_json(receipt, envelope)
     return {"status": "query_verified", "rows": rows, "duplicates": rows - distinct}
+
+
+def signal_existing(root: Path, db: sqlite3.Connection, config: dict[str, Any],
+                    run_id: str) -> dict[str, Any]:
+    if not config.get("status_rule") or not config.get("status_endpoint"):
+        raise CoachingError("Completion monitoring is not configured")
+    identifier = str(uuid.UUID(run_id))
+    run_row = db.execute("SELECT * FROM runs WHERE id=?", (identifier,)).fetchone()
+    if run_row is None or run_row["status"] != "published":
+        raise CoachingError("Only a published local run can be signaled")
+    verified = verify(config, root, identifier)
+    if verified["status"] != "query_verified":
+        raise CoachingError("Published rows are not yet visible; no success signal sent")
+    receipt = json.loads((root / "receipts" / f"{identifier}.json").read_text())
+    return {"status": "signaled", "run_id": identifier,
+            **signal(root, config, identifier, run_row["created_at"],
+                     "published", len(receipt["rows"]))}
+
+
+def install_monitor(root: Path, config: dict[str, Any], endpoint: str, rule: str) -> dict[str, str]:
+    """Update an owned scheduler to a stable worker snapshot without a paid run."""
+    import plistlib
+
+    if platform.system() != "Darwin" or not owned_plist():
+        raise CoachingError("An existing macOS coaching schedule is required")
+    if not re.fullmatch(r"https://[a-z0-9.-]+\.ingest\.monitor\.azure\.com", endpoint):
+        raise CoachingError("Unexpected status ingestion endpoint")
+    if not re.fullmatch(r"dcr-[a-f0-9]{32}", rule):
+        raise CoachingError("Unexpected status DCR immutable ID")
+    runtime = root / "runtime"
+    if runtime.is_symlink() or (runtime / "tools").is_symlink():
+        raise CoachingError("Refusing symlinked worker runtime")
+    (runtime / "tools").mkdir(parents=True, mode=0o700, exist_ok=True)
+    python = runtime / ".venv/bin/python"
+    subprocess.run([sys.executable, "-m", "venv", str(runtime / ".venv")],
+                   check=True, capture_output=True, timeout=120)
+    subprocess.run([str(python), "-m", "pip", "install", "--quiet", "jsonschema>=4.23,<5"],
+                   check=True, capture_output=True, timeout=180)
+    for name in ("coaching.py", "azure_cli.py", "coaching-openssl.cnf"):
+        shutil.copy2(ROOT / "tools" / name, runtime / "tools" / name)
+    config.update(status_endpoint=endpoint, status_rule=rule)
+    atomic_json(root / "policy.json", config)
+    original = PLIST.read_bytes()
+    launch = plistlib.loads(original)
+    launch["WorkingDirectory"] = str(runtime)
+    launch["ProgramArguments"][0] = str(python)
+    # Do not let configuration changes launch a paid catch-up run.
+    launch["RunAtLoad"] = False
+    target = f"gui/{os.getuid()}/{LABEL}"
+    subprocess.run(["launchctl", "bootout", target], check=True, capture_output=True, timeout=15)
+    try:
+        PLIST.write_bytes(plistlib.dumps(launch))
+        subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(PLIST)],
+                       check=True, capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        rollback = plistlib.loads(original)
+        rollback["RunAtLoad"] = False
+        PLIST.write_bytes(plistlib.dumps(rollback))
+        subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(PLIST)],
+                       capture_output=True, timeout=15)
+        raise
+    return {"status": "monitor_publisher_installed", "paid_run": "not_started"}
 
 
 def owned_plist() -> bool:
@@ -447,8 +548,12 @@ def main() -> int:
     runner.add_argument("--execute", action="store_true", required=True)
     runner.add_argument("--scheduled", action="store_true")
     runner.add_argument("--retry", action="store_true")
+    monitor = commands.add_parser("monitor-install")
+    monitor.add_argument("--endpoint", required=True)
+    monitor.add_argument("--rule", required=True)
+    monitor.add_argument("--execute", action="store_true", required=True)
     commands.add_parser("status")
-    for name in ("publish", "verify"):
+    for name in ("publish", "verify", "signal"):
         commands.add_parser(name).add_argument("run_id")
     args = parser.parse_args()
     root = args.state_dir.expanduser().absolute()
@@ -474,6 +579,10 @@ def main() -> int:
                     result = republish(root, db, config, args.run_id)
                 elif args.command == "verify":
                     result = verify(config, root, args.run_id)
+                elif args.command == "signal":
+                    result = signal_existing(root, db, config, args.run_id)
+                elif args.command == "monitor-install":
+                    result = install_monitor(root, config, args.endpoint, args.rule)
                 else:
                     result = {
                         "enabled": config["enabled"], "schedule_installed": PLIST.exists(),
@@ -483,7 +592,7 @@ def main() -> int:
                             "ORDER BY created_at DESC LIMIT 7")],
                     }
         print(json.dumps(result, indent=2))
-        return 1 if result.get("status") == "failed" else 0
+        return 1 if result.get("status") == "failed" or result.get("status_warning") else 0
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error,
             subprocess.SubprocessError, ValidationError) as error:
         detail = str(error) if isinstance(error, CoachingError) else type(error).__name__

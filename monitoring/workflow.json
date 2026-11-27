@@ -1,0 +1,182 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workspace": {"type": "String"},
+    "endpoint": {"type": "String"},
+    "sender": {"type": "String"},
+    "recipient": {"type": "SecureString"},
+    "query": {"type": "String"},
+    "firstRun": {"type": "String"},
+    "testOutcome": {"type": "String", "defaultValue": ""}
+  },
+  "triggers": {
+    "Daily_1500_IST": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Day",
+        "interval": 1,
+        "timeZone": "India Standard Time",
+        "startTime": "@parameters('firstRun')",
+        "schedule": {"hours": [15], "minutes": [0]}
+      },
+      "runtimeConfiguration": {"concurrency": {"runs": 1}}
+    }
+  },
+  "actions": {
+    "Day": {
+      "type": "Compose",
+      "inputs": "@formatDateTime(convertFromUtc(utcNow(), 'India Standard Time'), 'yyyy-MM-dd')",
+      "runAfter": {}
+    },
+    "Start": {
+      "type": "Compose",
+      "inputs": "@convertToUtc(concat(outputs('Day'), 'T00:00:00'), 'India Standard Time')",
+      "runAfter": {"Day": ["Succeeded"]}
+    },
+    "Deadline": {
+      "type": "Compose",
+      "inputs": "@convertToUtc(concat(outputs('Day'), 'T15:00:00'), 'India Standard Time')",
+      "runAfter": {"Start": ["Succeeded"]}
+    },
+    "Outcome": {
+      "type": "InitializeVariable",
+      "inputs": {"variables": [{"name": "outcome", "type": "string", "value": "unknown"}]},
+      "runAfter": {"Deadline": ["Succeeded"]}
+    },
+    "Due": {
+      "type": "If",
+      "expression": "@or(not(empty(parameters('testOutcome'))), greaterOrEquals(ticks(utcNow()), ticks(outputs('Deadline'))))",
+      "runAfter": {"Outcome": ["Succeeded"]},
+      "actions": {
+        "Operation": {
+          "type": "Compose",
+          "inputs": "@concat('00000000-0000-5000-8000-', replace(outputs('Day'), '-', ''), if(equals(parameters('testOutcome'), 'received'), '0001', if(equals(parameters('testOutcome'), 'missing/failed'), '0002', if(equals(parameters('testOutcome'), 'unknown'), '0003', '0000'))))",
+          "runAfter": {}
+        },
+        "New_email": {
+          "type": "Scope",
+          "runAfter": {"Operation": ["Succeeded"]},
+          "actions": {
+            "Evaluate": {
+              "type": "Scope",
+              "runAfter": {},
+              "actions": {
+                "Query": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "@concat('https://api.loganalytics.azure.com/v1/workspaces/', parameters('workspace'), '/query')",
+                    "authentication": {"type": "ManagedServiceIdentity", "audience": "https://api.loganalytics.io"},
+                    "body": {
+                      "query": "@replace(replace(replace(parameters('query'), '__DAY__', outputs('Day')), '__START__', outputs('Start')), '__DEADLINE__', outputs('Deadline'))",
+                      "timespan": "@concat(outputs('Start'), '/', outputs('Deadline'))"
+                    },
+                    "retryPolicy": {"type": "exponential", "count": 4, "interval": "PT10S"}
+                  },
+                  "runAfter": {}
+                },
+                "Validate": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@body('Query')",
+                    "schema": {
+                      "type": "object",
+                      "required": ["tables"],
+                      "not": {"required": ["error"]},
+                      "properties": {
+                        "tables": {
+                          "type": "array", "minItems": 1, "maxItems": 1,
+                          "items": {
+                            "type": "object", "required": ["columns", "rows"],
+                            "properties": {
+                              "columns": {
+                                "type": "array", "minItems": 1, "maxItems": 1,
+                                "items": {
+                                  "type": "object", "required": ["name", "type"],
+                                  "properties": {"name": {"enum": ["Outcome"]}, "type": {"enum": ["string"]}}
+                                }
+                              },
+                              "rows": {
+                                "type": "array", "minItems": 1, "maxItems": 1,
+                                "items": {
+                                  "type": "array", "minItems": 1, "maxItems": 1,
+                                  "items": {"enum": ["received", "missing/failed"]}
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "runAfter": {"Query": ["Succeeded"]}
+                },
+                "Set_outcome": {
+                  "type": "SetVariable",
+                  "inputs": {"name": "outcome", "value": "@body('Validate')['tables'][0]['rows'][0][0]"},
+                  "runAfter": {"Validate": ["Succeeded"]}
+                }
+              }
+            },
+            "Email": {
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@concat(parameters('endpoint'), '/emails:send?api-version=2023-03-31')",
+                "headers": {"Operation-Id": "@outputs('Operation')"},
+                "authentication": {"type": "ManagedServiceIdentity", "audience": "https://communication.azure.com"},
+                "body": {
+                  "senderAddress": "@parameters('sender')",
+                  "recipients": {"to": [{"address": "@parameters('recipient')"}]},
+                  "userEngagementTrackingDisabled": true,
+                  "content": {
+                    "subject": "@concat(if(empty(parameters('testOutcome')), '', '[TEST] '), 'Coaching ', outputs('Day'), ': ', if(empty(parameters('testOutcome')), variables('outcome'), parameters('testOutcome')))",
+                    "plainText": "@concat('Daily coaching operational status: ', if(empty(parameters('testOutcome')), variables('outcome'), parameters('testOutcome')), '. Deadline: ', outputs('Day'), ' 15:00 Asia/Kolkata (UTC+05:30). Received means explicit completion and matching published row count, including zero items. Missing/failed means no successful report was confirmed by the deadline. Unknown means the monitoring query failed; receipt is NOT confirmed. No paid coaching retry was started.')"
+                  }
+                },
+                "retryPolicy": {"type": "exponential", "count": 4, "interval": "PT10S"}
+              },
+              "runAfter": {"Evaluate": ["Succeeded", "Failed", "TimedOut"]},
+              "runtimeConfiguration": {"secureData": {"properties": ["inputs", "outputs"]}},
+              "operationOptions": "DisableAsyncPattern"
+            },
+            "Wait_for_send": {
+              "type": "Until",
+              "expression": "@or(equals(body('Send_result')?['status'], 'Succeeded'), equals(body('Send_result')?['status'], 'Failed'), equals(body('Send_result')?['status'], 'Canceled'))",
+              "limit": {"count": 20, "timeout": "PT5M"},
+              "actions": {
+                "Wait": {"type": "Wait", "inputs": {"interval": {"count": 10, "unit": "Second"}}, "runAfter": {}},
+                "Send_result": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "GET",
+                    "uri": "@concat(parameters('endpoint'), '/emails/operations/', outputs('Operation'), '?api-version=2023-03-31')",
+                    "authentication": {"type": "ManagedServiceIdentity", "audience": "https://communication.azure.com"}
+                  },
+                  "runAfter": {"Wait": ["Succeeded"]}
+                }
+              },
+              "runAfter": {"Email": ["Succeeded", "Failed", "TimedOut"]}
+            },
+            "Confirm_sent": {
+              "type": "If",
+              "expression": "@equals(body('Send_result')?['status'], 'Succeeded')",
+              "actions": {
+                "Confirmed": {"type": "Terminate", "inputs": {"runStatus": "Succeeded"}, "runAfter": {}}
+              },
+              "else": {
+                "actions": {
+                  "Send_failed": {"type": "Terminate", "inputs": {"runStatus": "Failed", "runError": {"code": "EmailSendFailed", "message": "ACS email processing failed; inspect delivery diagnostics."}}, "runAfter": {}}
+                }
+              },
+              "runAfter": {"Wait_for_send": ["Succeeded"]}
+            }
+          }
+        }
+      },
+      "else": {"actions": {}}
+    }
+  },
+  "outputs": {}
+}
