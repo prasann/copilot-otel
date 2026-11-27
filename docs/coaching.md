@@ -29,7 +29,8 @@ or single-slug repository. Project labels with spaces are left unattributed rath
 than converted to guessed repository names. The model's strict schema uses the same
 length, count, and repository constraints as local validation.
 Newlines, code fences, local paths, and secret patterns fail the run.
-Nothing is published from a failed run.
+No coaching items are published from a failed run. A successful report may contain
+zero items; optional monitoring records completion separately from dashboard items.
 
 ## Setup
 

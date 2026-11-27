@@ -109,7 +109,6 @@ class CoachingTests(unittest.TestCase):
         validator.validate({"items": boundary})
         coaching.ITEMS.validate(boundary)
         invalid = [
-            ([], "minItems"),
             ([ITEMS[0]] * (coaching.MAX_ITEMS + 1), "maxItems"),
             ([{**ITEMS[1], "repository": "Project label"}], "pattern"),
             ([{**ITEMS[0], "title": ""}], "minLength"),
@@ -191,6 +190,83 @@ class CoachingTests(unittest.TestCase):
             with self.assertRaisesRegex(coaching.CoachingError, "already accepted"):
                 coaching.republish(self.root, db, self.config, failed["run_id"])
             self.assertEqual(db.execute("SELECT status FROM runs").fetchone()[0], "published")
+
+    def test_zero_items_is_a_success_with_explicit_completion_and_no_empty_upload(self):
+        self.config.update(status_endpoint=self.config["ingestion_endpoint"],
+                           status_rule=self.config["rule"])
+        result, calls = self.execute([])
+        self.assertEqual((result["status"], result["items"]), ("published", 0))
+        self.assertEqual(len(calls), 2)
+        self.assertIn(coaching.STATUS_STREAM, calls[1][0])
+        row, = calls[1][1]
+        self.assertEqual((row["Status"], row["ExpectedItems"]), ("published", 0))
+        from datetime import datetime
+        self.assertEqual(row["RunDay"],
+                         datetime.fromtimestamp(NOW, coaching.COACHING_ZONE).date().isoformat())
+
+    def test_publication_failure_never_signals_success(self):
+        self.config.update(status_endpoint=self.config["ingestion_endpoint"],
+                           status_rule=self.config["rule"])
+        calls = []
+
+        def send(url, audience, body):
+            calls.append((url, body))
+            if audience == "https://ai.azure.com":
+                return model_response(ITEMS)
+            if coaching.STATUS_STREAM in url:
+                return None
+            raise RuntimeError("Upload failed")
+
+        with coaching.locked(self.root) as db, \
+                patch.object(coaching, "load_config", return_value=MODEL), \
+                patch.object(coaching, "rest", side_effect=send):
+            result = coaching.run(self.root, db, self.config, NOW,
+                                  collect=lambda kind, *_: (REPORTS[kind], None))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(calls[-1][1][0]["Status"], "failed")
+
+    def test_failed_completion_signal_preserves_publication_and_surfaces_warning(self):
+        self.config.update(status_endpoint=self.config["ingestion_endpoint"],
+                           status_rule=self.config["rule"])
+
+        def send(url, audience, body):
+            if audience == "https://ai.azure.com":
+                return model_response(ITEMS)
+            if coaching.STATUS_STREAM in url:
+                raise RuntimeError("Signal unavailable")
+
+        with coaching.locked(self.root) as db, \
+                patch.object(coaching, "load_config", return_value=MODEL), \
+                patch.object(coaching, "rest", side_effect=send):
+            result = coaching.run(self.root, db, self.config, NOW,
+                                  collect=lambda kind, *_: (REPORTS[kind], None))
+        self.assertEqual(result["status"], "published")
+        self.assertIn("pending", result["status_warning"])
+        receipt = json.loads((self.root / "signals" / f"{result['run_id']}.json").read_text())
+        self.assertEqual(receipt["status"], "pending")
+
+    def test_monitor_install_uses_stable_snapshot_without_launching_paid_catch_up(self):
+        import plistlib
+
+        with coaching.locked(self.root):
+            plist = self.root / "agent.plist"
+            plist.write_bytes(plistlib.dumps({
+                "ProgramArguments": ["/python", "-m", "tools.coaching", "--state-dir",
+                                     str(self.root), "run", "--execute", "--scheduled"],
+                "WorkingDirectory": "/old", "RunAtLoad": True,
+                "StartCalendarInterval": {"Hour": 9, "Minute": 0}, "StartInterval": 3600,
+            }))
+            with patch.object(coaching, "PLIST", plist), \
+                    patch.object(coaching.platform, "system", return_value="Darwin"), \
+                    patch.object(coaching.subprocess, "run") as invoke:
+                coaching.install_monitor(self.root, self.config,
+                                         self.config["ingestion_endpoint"], self.config["rule"])
+            installed = plistlib.loads(plist.read_bytes())
+            self.assertFalse(installed["RunAtLoad"])
+            self.assertEqual(installed["WorkingDirectory"], str(self.root / "runtime"))
+            self.assertEqual(installed["StartInterval"], 3600)
+            self.assertTrue((self.root / "runtime/tools/coaching.py").exists())
+            self.assertFalse(any("--execute" in call.args[0] for call in invoke.call_args_list))
 
     def test_scheduled_run_waits_for_nine_and_runs_once_per_day(self) -> None:
         self.config["schedule_after"] = NOW + coaching.DAY

@@ -1,0 +1,14 @@
+let start = datetime(__START__);
+let deadline = datetime(__DEADLINE__);
+let published = CopilotInsights_CL
+| where TimeGenerated between (start .. deadline)
+| summarize by RunId, Kind, Rank
+| summarize ActualItems=count() by RunId;
+CopilotCoachingRuns_CL
+| where TimeGenerated between (start .. deadline) and RunDay == '__DAY__'
+| summarize arg_max(TimeGenerated, *) by RunId
+| join kind=leftouter published on RunId
+| extend ActualItems=coalesce(ActualItems, 0)
+| summarize Successes=countif(Status == 'published' and ExpectedItems >= 0
+                             and ExpectedItems == ActualItems)
+| project Outcome=iff(Successes > 0, 'received', 'missing/failed')
