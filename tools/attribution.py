@@ -58,8 +58,6 @@ class Policy:
                 raise ValueError("Invalid discovery policy; use absolute paths and excluded_workspaces")
             root = Path(value["projects_root"]).resolve()
             excluded = tuple(Path(item).resolve() for item in value["excluded_workspaces"])
-            if any(not item.is_relative_to(root) for item in excluded):
-                raise ValueError("Excluded workspaces must be inside projects_root")
             return cls(Path(value["editor"]).resolve(), projects_root=root,
                        excluded_workspaces=excluded, desktop_catalog=DESKTOP_CATALOG)
         if (not isinstance(value, dict) or type(value.get("version")) is not int
@@ -141,32 +139,47 @@ class Resolver:
 
     def snapshot(self) -> "Snapshot":
         identities: dict[str, set[tuple[str, str, str]]] = {}
-        blocked = set()
+        blocked: dict[tuple[str, str], str] = {}
         incomplete = False
         mappings = {}
         try:
+            lookup = (native.WorkspaceLookup(
+                self.policy.projects_root, self.policy.excluded_workspaces,
+            ) if self.policy.projects_root is not None else None)
             candidates, _ = native.discover(
                 self.policy.editor, self.policy.projects, 0,
                 projects_root=self.policy.projects_root,
                 excluded_workspaces=self.policy.excluded_workspaces,
+                lookup=lookup,
             )
-            workspaces: dict[str, set[Path]] = {}
+            workspaces: dict[str, set[tuple[str, Path]]] = {}
             for candidate in candidates:
-                workspaces.setdefault(candidate.project_id, set()).add(candidate.workspace)
+                if candidate.reason == "resolved":
+                    workspaces.setdefault(candidate.project_id, set()).add(
+                        candidate.project_identity or ("path", candidate.workspace),
+                    )
             for candidate in candidates:
-                if (not candidate.supported
+                reason = candidate.reason
+                if (candidate.reason != "resolved" or not candidate.supported
                         or not re.fullmatch(PROJECT_ALIAS_PATTERN, candidate.project_id)
                         or candidate.project_id == "synthetic/demo"):
-                    blocked.add(("vscode", candidate.host_id))
-                    incomplete = True
-                    continue
+                    reason = (
+                        candidate.reason if candidate.reason != "resolved" else "unsupported_source"
+                    )
                 try:
                     sdk_id = sdk_session_id(self.policy.editor, candidate.host_id)
                 except (OSError, ValueError, sqlite3.Error):
-                    blocked.add(("vscode", candidate.host_id))
+                    blocked[("vscode", candidate.host_id)] = (
+                        reason if reason != "resolved" else "unsupported_source"
+                    )
                     incomplete = True
                     continue
                 mappings[candidate.host_id] = sdk_id
+                if reason != "resolved":
+                    for key in (candidate.host_id, sdk_id):
+                        blocked[("vscode", key)] = reason
+                    incomplete = True
+                    continue
                 for key in (candidate.host_id, sdk_id):
                     identities.setdefault(key, set()).add(
                         ("vscode", candidate.host_id, candidate.project_id),
@@ -180,21 +193,23 @@ class Resolver:
                         continue
                     if (canonical != session_id or not isinstance(cwd, str)
                             or not cwd or not Path(cwd).is_absolute()):
-                        blocked.add(("desktop", canonical))
+                        blocked[("desktop", canonical)] = "unsupported_source"
                         incomplete = True
                         continue
-                    workspace = Path(cwd).resolve()
-                    if self.policy.projects_root is None:
+                    if lookup is None:
                         raise ValueError("Desktop lookup requires discovery policy")
-                    alias = native.workspace_alias(
-                        workspace, self.policy.projects_root, self.policy.excluded_workspaces,
-                    )
+                    project = lookup.project(Path(cwd))
+                    alias = project.alias
+                    if project.reason != "resolved":
+                        blocked[("desktop", canonical)] = project.reason
+                        incomplete = True
+                        continue
                     if alias is None:
                         continue
-                    workspaces.setdefault(alias, set()).add(workspace)
+                    workspaces.setdefault(alias, set()).add(project.identity)
                     if (not re.fullmatch(PROJECT_ALIAS_PATTERN, alias)
                             or alias == "synthetic/demo"):
-                        blocked.add(("desktop", canonical))
+                        blocked[("desktop", canonical)] = "unsupported_source"
                         incomplete = True
                         continue
                     identities.setdefault(session_id, set()).add(("desktop", session_id, alias))
@@ -205,15 +220,18 @@ class Resolver:
                 self.policy.editor, self.policy.projects, 0,
                 projects_root=self.policy.projects_root,
                 excluded_workspaces=self.policy.excluded_workspaces,
+                lookup=lookup,
             )
             if current != candidates:
                 raise ValueError("Catalog changed during lookup")
             if any(sdk_session_id(self.policy.editor, host) != sdk
                    for host, sdk in mappings.items()):
                 raise ValueError("SDK mapping changed during lookup")
+            if lookup is not None:
+                lookup.validate()
         except (OSError, ValueError, KeyError, TypeError, sqlite3.Error):
             LOG.warning("Attribution metadata unavailable; spans remain unattributed (lookup_failed)")
-            return Snapshot({}, set(), "lookup_failed")
+            return Snapshot({}, {}, "lookup_failed")
         if incomplete:
             LOG.warning("Attribution metadata incomplete; unresolved spans remain unattributed")
         if conflicting_projects:
@@ -225,7 +243,7 @@ class Resolver:
 @dataclass
 class Snapshot:
     identities: dict[str, set[tuple[str, str, str]]]
-    blocked: set[tuple[str, str]]
+    blocked: dict[tuple[str, str], str]
     unknown_reason: str
     conflicting_projects: set[str] = field(default_factory=set)
 
@@ -261,8 +279,11 @@ class Snapshot:
                 allowed = {"vscode"}
             else:
                 allowed = {"vscode", "desktop"} if source == "unknown" else {source}
-            if any((origin, key) in self.blocked for origin in allowed):
-                return Resolution(reason="unsupported_source")
+            failures = {self.blocked[(origin, key)] for origin in allowed
+                        if (origin, key) in self.blocked}
+            if failures:
+                return Resolution(reason=next(iter(failures)) if len(failures) == 1
+                                  else "identity_conflict")
             found = {match for match in self.identities.get(key, set()) if match[0] in allowed}
             if not found:
                 return Resolution(reason=self.unknown_reason)
@@ -306,7 +327,7 @@ def enrich(payload: Any, resolver: Resolver, source: str = "unknown") -> dict[st
     if source not in SOURCES:
         raise ValueError("Unsupported telemetry source")
     spans = spans_in(payload)
-    snapshot = resolver.snapshot() if spans else Snapshot({}, set(), "unknown_session")
+    snapshot = resolver.snapshot() if spans else Snapshot({}, {}, "unknown_session")
     counts: Counter[str] = Counter()
     for span in spans:
         attributes = span.get("attributes", [])
