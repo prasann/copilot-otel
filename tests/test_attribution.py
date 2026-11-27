@@ -2,6 +2,7 @@ import copy
 import http.client
 import json
 import logging
+import os
 import socket
 import sqlite3
 import subprocess
@@ -66,6 +67,7 @@ class AttributionTests(unittest.TestCase):
     def add_session(self, alias: str, sdk: str | None = None) -> tuple[str, str]:
         host, sdk = str(uuid.uuid4()), sdk or str(uuid.uuid4())
         workspace = Path(self.projects[alias])
+        workspace.mkdir(parents=True, exist_ok=True)
         payload = {"payloadVersion": 2, "data": {
             "isArchived": False, "project": {"uri": workspace.as_uri()},
             "workingDirectories": [workspace.as_uri()], "chats": [{"kind": "default"}],
@@ -147,6 +149,8 @@ class AttributionTests(unittest.TestCase):
     def add_desktop(self, folder: str | None, host: str = "github",
                     identity: str | None = None) -> str:
         identity = identity or str(uuid.uuid4())
+        if isinstance(folder, str) and folder and Path(folder).is_absolute():
+            Path(folder).mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(self.desktop)) as db, db:
             db.execute("INSERT INTO sessions VALUES (?, ?, ?)", (identity, folder, host))
         return identity
@@ -260,6 +264,7 @@ class AttributionTests(unittest.TestCase):
             snapshot = resolver.snapshot()
         self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/alpha")
         self.assertEqual(snapshot.resolve(self.attributes(str(uuid.uuid4()))).reason, "lookup_incomplete")
+        (policy.projects_root / "work/beta").mkdir(parents=True)
         with closing(sqlite3.connect(self.desktop)) as db, db:
             db.execute("UPDATE sessions SET cwd=? WHERE id=?",
                        (str(policy.projects_root / "work/beta"), identity))
@@ -347,11 +352,359 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(snapshot.resolve(self.attributes(linked[0])).project, "unattributed")
         self.assertEqual(snapshot.resolve(self.attributes(invalid[0])).reason, "unsupported_source")
 
-    def test_discovery_policy_rejects_relative_paths_and_outside_exclusions(self) -> None:
+    def git_fixture(self, directory: Path, *arguments: str) -> None:
+        environment = {
+            "PATH": os.environ["PATH"], "HOME": str(self.root),
+            "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+        }
+        subprocess.run(
+            ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={os.devnull}",
+             "-C", str(directory), *arguments],
+            env=environment, check=True, capture_output=True,
+        )
+
+    def git_project(self, path: Path) -> Path:
+        path.mkdir(parents=True, exist_ok=True)
+        self.git_fixture(path, "init", "--quiet", "--template=", "--initial-branch=main")
+        self.git_fixture(path, "commit", "--quiet", "--allow-empty", "-m", "fixture")
+        return path
+
+    def linked_project(self, primary: Path, path: Path, relative: bool = False) -> Path:
+        arguments = ["worktree", "add", "--quiet", "--detach", "--no-checkout"]
+        if relative:
+            arguments.append("--relative-paths")
+        self.git_fixture(primary, *arguments, str(path))
+        return path
+
+    def test_registered_worktrees_and_subdirectories_roll_up_for_both_clients(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        internal = self.linked_project(primary, policy.projects_root / "worktrees/branch")
+        external = self.linked_project(primary, self.root / "external/branch", relative=True)
+        folders = (primary, primary / "src", internal, external, external / "src")
+        desktop, vscode = [], []
+        for index, folder in enumerate(folders):
+            self.projects[str(index)] = str(folder)
+            vscode.append(self.add_session(str(index)))
+            desktop.append(self.add_desktop(str(folder)))
+        resolver = attribution.Resolver(policy)
+        with patch.object(subprocess, "run", side_effect=AssertionError("no runtime Git")), \
+                patch.dict(os.environ, {"GIT_DIR": "/invalid", "GIT_WORK_TREE": "/invalid",
+                                        "GIT_COMMON_DIR": "/invalid"}):
+            snapshot = resolver.snapshot()
+        for identity in desktop:
+            self.assertEqual(snapshot.resolve(self.attributes(identity), "desktop").project,
+                             "personal/app")
+            self.assertEqual(snapshot.resolve(self.attributes(identity), "vscode").project,
+                             "unattributed")
+        for host, sdk in vscode:
+            self.assertEqual(snapshot.resolve(self.attributes(sdk, host), "vscode").project,
+                             "personal/app")
+        payload = self.payload(self.attributes(desktop[-1]))
+        attributes = payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]
+        attributes.extend([
+            {"key": "accounting.scope", "value": {"stringValue": "top_level"}},
+            {"key": "github.copilot.nano_aiu", "value": {"intValue": "1000000000"}},
+        ])
+        before = copy.deepcopy(payload)
+        self.assertEqual(attribution.enrich(payload, resolver, "desktop"), {"resolved": 1})
+        span = payload["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+        self.assertEqual((span["traceId"], span["spanId"]), ("a" * 32, "b" * 16))
+        values = {item["key"]: item["value"] for item in span["attributes"]}
+        self.assertEqual(values["telemetry.source"], {"stringValue": "desktop"})
+        self.assertEqual(values["project.id"], {"stringValue": "personal/app"})
+        for item in before["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"]:
+            self.assertEqual(values[item["key"]], item["value"])
+        self.assertNotIn(str(self.root), json.dumps(payload))
+
+    def test_worktree_exclusions_and_symlink_escape_cannot_bypass_project_policy(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        external = self.linked_project(primary, self.root / "external/branch")
+        internal = self.linked_project(primary, policy.projects_root / "worktrees/branch")
+        folders = (primary, external, external / "private", internal)
+        identities = [self.add_desktop(str(folder)) for folder in folders]
+        for excluded, allowed in (
+            (primary, set()), (external, {0, 3}), (external / "private", {0, 1, 3}),
+            (internal, {0, 1, 2}),
+        ):
+            snapshot = attribution.Resolver(self.discovery_policy([str(excluded)])).snapshot()
+            for index, identity in enumerate(identities):
+                with self.subTest(excluded=excluded.name, index=index):
+                    self.assertEqual(snapshot.resolve(self.attributes(identity)).project,
+                                     "personal/app" if index in allowed else "unattributed")
+        escape = policy.projects_root / "escape"
+        escape.symlink_to(external, target_is_directory=True)
+        escaped = self.add_desktop(str(escape))
+        snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(escaped)).project, "unattributed")
+        self.assertEqual(snapshot.resolve(self.attributes(identities[1])).project, "personal/app")
+        outside = self.git_project(self.root / "outside/app")
+        outside_worktree = self.linked_project(outside, policy.projects_root / "worktrees/outside")
+        denied = self.add_desktop(str(outside_worktree))
+        snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(denied)).project, "unattributed")
+
+    def test_repository_identity_preserves_real_alias_conflicts_and_nested_ownership(self) -> None:
+        policy = self.discovery_policy()
+        first = self.git_project(policy.projects_root / "personal/one/shared")
+        second = self.git_project(policy.projects_root / "personal/two/shared")
+        linked = self.linked_project(first, self.root / "external/shared")
+        nested = self.git_project(first / "nested")
+        identities = [self.add_desktop(str(folder)) for folder in (first, second, linked, nested)]
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        for identity in identities[:3]:
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).reason, "identity_conflict")
+        self.assertEqual(snapshot.resolve(self.attributes(identities[-1])).project, "personal/nested")
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("DELETE FROM sessions WHERE id=?", (identities[1],))
+        snapshot = attribution.Resolver(policy).snapshot()
+        for identity in (identities[0], identities[2]):
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/shared")
+
+    def test_corrupt_worktree_metadata_fails_closed_without_private_logs(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        identity = self.add_desktop(str(linked))
+        marker = linked / ".git"
+        admin = Path(marker.read_text().strip().removeprefix("gitdir: "))
+        changes = (
+            (marker, b"gitdir: incomplete\n"),
+            (marker, f"gitdir: {primary}/.git/absent/../worktrees/{admin.name}\n".encode()),
+            (admin / "gitdir", b"/private/wrong/.git\n"),
+            (admin / "commondir", b"/private/wrong/.git\n"),
+            (admin / "HEAD", b"ref: refs/heads/../bad\n"),
+            (primary / ".git/config", b"[core\nprivate_value\n"),
+            (marker, b"gitdir: \x00private\n"),
+            (marker, b"x" * (attribution.native.MAX_METADATA_FILE + 1)),
+        )
+        resolver = attribution.Resolver(policy)
+        for path, content in changes:
+            original = path.read_bytes()
+            try:
+                path.write_bytes(content)
+                with self.subTest(path=path.name), self.assertLogs(
+                    attribution.LOG, logging.WARNING,
+                ) as logs:
+                    snapshot = resolver.snapshot()
+                expected = "unsupported_source" if content == b"gitdir: incomplete\n" else "lookup_failed"
+                self.assertEqual(snapshot.resolve(self.attributes(identity)).reason, expected)
+                self.assertNotIn(str(self.root), "".join(logs.output))
+                self.assertNotIn("private", "".join(logs.output))
+            finally:
+                path.write_bytes(original)
+            self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).project,
+                             "personal/app")
+        original = (admin / "gitdir").read_bytes()
+        (admin / "gitdir").unlink()
+        (admin / "gitdir").symlink_to(marker)
+        try:
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        finally:
+            (admin / "gitdir").unlink()
+            (admin / "gitdir").write_bytes(original)
+        with patch.object(attribution.native.os, "open",
+                          side_effect=PermissionError("PRIVATE_PATH")):
+            with self.assertLogs(attribution.LOG, logging.WARNING) as logs:
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        self.assertNotIn("PRIVATE_PATH", "".join(logs.output))
+
+    def test_unsupported_git_topologies_do_not_fall_back_to_parent_project(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        identity = self.add_desktop(str(linked))
+        config = primary / ".git/config"
+        original = config.read_bytes()
+        for extra in (
+            '\n[core]\nworktree = /private/elsewhere\n',
+            '\n[include]\npath = /private/config\n',
+            '\n[extensions]\nworktreeConfig = true\n',
+            '\n[extensions]\nunknownTopology = true\n',
+        ):
+            config.write_bytes(original + extra.encode())
+            with self.subTest(extra=extra), self.assertLogs(attribution.LOG, logging.WARNING):
+                snapshot = attribution.Resolver(policy).snapshot()
+            self.assertEqual(snapshot.resolve(self.attributes(identity)).reason, "unsupported_source")
+        config.write_bytes(original)
+        for name, target in (("submodule", primary / ".git/modules/child"),
+                             ("bare-worktree", self.root / "bare/worktrees/child")):
+            folder = primary / name
+            folder.mkdir()
+            (folder / ".git").write_text(f"gitdir: {target}\n")
+            failed = self.add_desktop(str(folder))
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                snapshot = attribution.Resolver(policy).snapshot()
+            self.assertEqual(snapshot.resolve(self.attributes(failed)).reason, "unsupported_source")
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/app")
+
+    def test_missing_directories_and_mid_snapshot_metadata_changes_are_not_cached(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        identity = self.add_desktop(str(linked))
+        vanished = self.add_desktop(str(policy.projects_root / "personal/vanished"))
+        (policy.projects_root / "personal/vanished").rmdir()
+        (primary / "src").mkdir()
+        invalid_path = str(primary / "missing/../src")
+        invalid = str(uuid.uuid4())
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("INSERT INTO sessions VALUES (?, ?, 'github')", (invalid, invalid_path))
+        resolver = attribution.Resolver(policy)
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = resolver.snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(vanished)).reason, "lookup_incomplete")
+        self.assertEqual(snapshot.resolve(self.attributes(invalid)).reason, "lookup_incomplete")
+        self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/app")
+        marker = linked / ".git"
+        original = marker.read_bytes()
+        validate = attribution.native.WorkspaceLookup.validate
+
+        def change(lookup: attribution.native.WorkspaceLookup) -> None:
+            marker.write_text("gitdir: /private/stale\n")
+            validate(lookup)
+
+        with patch.object(attribution.native.WorkspaceLookup, "validate", change):
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        marker.write_bytes(original)
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).project,
+                             "personal/app")
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("DELETE FROM sessions WHERE id IN (?, ?)", (vanished, invalid))
+        self.git_fixture(primary, "worktree", "move", str(linked), str(self.root / "moved"))
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).reason,
+                             "lookup_incomplete")
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("UPDATE sessions SET cwd=? WHERE id=?", (str(self.root / "moved"), identity))
+        self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).project, "personal/app")
+
+    def test_v2_catalog_and_metadata_limits_fail_without_truncating_external_candidates(self) -> None:
+        policy = self.discovery_policy()
+        with patch.object(attribution.native, "MAX_SESSIONS", 1):
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(attribution.Resolver(policy).snapshot().unknown_reason, "lookup_failed")
+        primary = self.git_project(policy.projects_root / "personal/app")
+        self.add_desktop(str(primary))
+        for constant, value in (("MAX_METADATA_FILE", 16), ("MAX_METADATA_BYTES", 16),
+                                ("MAX_ANCESTORS", 1)):
+            with patch.object(attribution.native, constant, value):
+                with self.subTest(constant=constant), self.assertLogs(attribution.LOG, logging.WARNING):
+                    self.assertEqual(attribution.Resolver(policy).snapshot().unknown_reason,
+                                     "lookup_failed")
+
+    def test_unscoped_vscode_records_do_not_block_worktree_discovery(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        identity = self.add_desktop(str(primary))
+        for project in (None, {}, {"uri": None}, {"uri": "vscode-remote://host/workspace"},
+                        {"uri": "file://remote/workspace"}):
+            payload = {"payloadVersion": 2, "data": {"project": project}}
+            with closing(sqlite3.connect(self.catalog)) as db, db:
+                db.execute("INSERT INTO sessions_v2 VALUES (?, 1, 1, 'copilotcli', 2, ?)",
+                           (f"copilotcli:/{uuid.uuid4()}", json.dumps(payload)))
+        snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(identity)).project, "personal/app")
+        self.assertEqual(snapshot.unknown_reason, "unknown_session")
+
+    def test_primary_moves_require_repaired_registration_and_change_future_aliases_only(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        identity = self.add_desktop(str(linked))
+        resolver = attribution.Resolver(policy)
+        before = resolver.snapshot()
+        self.assertEqual(before.resolve(self.attributes(identity)).project, "personal/app")
+        moved = policy.projects_root / "work/renamed"
+        moved.parent.mkdir()
+        primary.rename(moved)
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        self.git_fixture(moved, "worktree", "repair", str(linked))
+        self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).project, "work/renamed")
+        self.assertEqual(before.resolve(self.attributes(identity)).project, "personal/app")
+
+    def test_gitfile_requires_registration_and_trusted_non_symlink_metadata(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        identity = self.add_desktop(str(linked))
+        marker = linked / ".git"
+        admin = Path(marker.read_text().strip().removeprefix("gitdir: "))
+        forged = policy.projects_root / "worktrees/forged"
+        forged.mkdir(parents=True)
+        (forged / ".git").write_bytes(marker.read_bytes())
+        fake_id = self.add_desktop(str(forged))
+        resolver = attribution.Resolver(policy)
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            self.assertEqual(resolver.snapshot().resolve(self.attributes(fake_id)).reason, "lookup_failed")
+        with closing(sqlite3.connect(self.desktop)) as db, db:
+            db.execute("DELETE FROM sessions WHERE id=?", (fake_id,))
+        original_mode = marker.stat().st_mode
+        marker.chmod(0o666)
+        try:
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        finally:
+            marker.chmod(original_mode)
+        backup = admin.with_name(admin.name + "-fixture")
+        admin.rename(backup)
+        admin.symlink_to(backup, target_is_directory=True)
+        try:
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        finally:
+            admin.unlink()
+            backup.rename(admin)
+        original = marker.read_bytes()
+        marker.unlink()
+        marker.symlink_to(marker)
+        try:
+            with self.assertLogs(attribution.LOG, logging.WARNING):
+                self.assertEqual(resolver.snapshot().unknown_reason, "lookup_failed")
+        finally:
+            marker.unlink()
+            marker.write_bytes(original)
+        self.assertEqual(resolver.snapshot().resolve(self.attributes(identity)).project, "personal/app")
+
+    def test_working_directory_checks_use_actual_checkout_not_canonical_repository(self) -> None:
+        policy = self.discovery_policy()
+        primary = self.git_project(policy.projects_root / "personal/app")
+        linked = self.linked_project(primary, self.root / "external/branch")
+        self.projects["external"] = str(linked / "src")
+        valid = self.add_session("external")
+        invalid = self.add_session("external")
+        with closing(sqlite3.connect(self.catalog)) as db, db:
+            for host, directory in ((valid[0], linked), (invalid[0], primary)):
+                payload = json.loads(db.execute(
+                    "SELECT payload FROM sessions_v2 WHERE session_uri=?", (f"copilotcli:/{host}",),
+                ).fetchone()[0])
+                payload["data"]["workingDirectories"] = [directory.as_uri()]
+                db.execute("UPDATE sessions_v2 SET payload=? WHERE session_uri=?",
+                           (json.dumps(payload), f"copilotcli:/{host}"))
+        config = primary / ".git/config"
+        with config.open("a") as file:
+            file.write('\n[remote "example"]\nfetch = first\nfetch = second\n'
+                       '[alias]\nunused = !ignored\n')
+        with self.assertLogs(attribution.LOG, logging.WARNING):
+            snapshot = attribution.Resolver(policy).snapshot()
+        self.assertEqual(snapshot.resolve(self.attributes(valid[1]), "vscode").project, "personal/app")
+        self.assertEqual(snapshot.resolve(self.attributes(invalid[1]), "vscode").reason,
+                         "unsupported_source")
+
+    def test_discovery_policy_rejects_relative_paths_and_accepts_outside_exclusions(self) -> None:
         for key, value in (
             ("projects_root", "relative"),
             ("excluded_workspaces", ["relative"]),
-            ("excluded_workspaces", [str(self.root / "outside")]),
             ("excluded_workspaces", "not-an-array"),
         ):
             self.discovery_policy()
@@ -360,6 +713,8 @@ class AttributionTests(unittest.TestCase):
             self.policy_file.write_text(json.dumps(policy))
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 attribution.Policy.load(self.policy_file)
+        policy = self.discovery_policy([str(self.root / "outside")])
+        self.assertEqual(policy.excluded_workspaces, (self.root / "outside",))
 
     def test_uninitialized_catalog_revision_does_not_block_other_discovered_projects(self) -> None:
         policy = self.discovery_policy()

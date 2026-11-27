@@ -28,7 +28,9 @@ An All source filter retains them in totals; coaching ignores that filter.
 is not its runtime conversation UUID, and not every emitted span is covered by
 the local catalog. Do not treat unknown IDs as proof of a particular client.
 Check the labelled endpoint before suspecting the desktop/VS Code lookup.
-`identity_conflict` also covers distinct workspaces collapsing to the same alias.
+`identity_conflict` also covers distinct canonical repositories or non-Git
+workspaces collapsing to the same alias; registered worktrees of one repository
+do not conflict merely because their paths differ.
 On the shared endpoint, an ID present in both catalogs conflicts; labelled
 routes namespace the ID by client.
 
@@ -55,6 +57,56 @@ queue/cloud. Source-prefix routes require the updated gateway, and preserving
 source requires reinstalling the stopped collector with the same policy.
 The source-aware dashboard JSON also needs deployment; none of those steps
 is implied by a local `/health` success.
+
+### Git worktree project rollup
+
+Version 2 uses the same resolver for VS Code and desktop: exact catalog identity
+first, then the actual workspace's nearest Git checkout and verified primary
+checkout. Repository subdirectories roll up to that primary; nested independent
+repositories stay independent. Non-Git directories keep the previous
+workspace-based alias. Version 1's explicit allowlist is unchanged.
+
+For an unexpected `unattributed` result, check the following privately:
+
+- The session directory must still exist. A removed worktree or stale catalog
+  `cwd` yields `lookup_incomplete`, not a folder-name guess.
+- A linked checkout's `.git` gitfile must identify its registered administrative
+  directory under the primary's `.git/worktrees/`. Its `commondir` and `gitdir`
+  must link back consistently to the common directory and actual checkout.
+  Copying a gitfile alone does not establish registration.
+- The primary checkout must exist inside `projects_root`. Exclusions apply to
+  actual session/checkout paths and the primary; an absolute exclusion outside
+  the root can exclude one external worktree without excluding its siblings.
+  An inside-root symlink escaping to an external directory stays ineligible.
+- Metadata must be user-owned, regular files or real directories, and not
+  group/other writable. Symlinked Git markers/administrative directories, bad
+  backreferences, read errors, or metadata changes during an export fail the
+  batch with `lookup_failed` rather than risk hiding an alias conflict.
+
+Bare-common-directory worktrees, separate Git directories, absorbed submodule
+gitfiles, includes, `core.worktree` overrides, worktree-specific config, and
+unsupported Git config syntax/topology yield `unsupported_source` or
+`lookup_failed`. Do not remove legitimate configuration just to make attribution
+pass; these layouts are deliberately unsupported initially. A standalone nested
+repository with an ordinary `.git` directory is supported.
+
+For a manually moved checkout, inspect and repair Git registration separately
+using Git's documented `worktree repair` procedure only when you intend that
+repository change. The gateway never repairs, prunes, or executes Git. Once
+registration and catalog paths agree, the next export rereads them; no cache
+flush is needed. A primary move that changes category/name changes only future
+aliases. Old dashboard rows are not rewritten.
+
+The VS Code 1,000-candidate bound now includes out-of-root local sessions because
+external worktrees must be considered before root filtering. Catalog or metadata
+overflow fails with `lookup_failed`; it is never silently truncated. Repeated
+workspaces share reads only within a batch. Records without a local `file:///`
+project URI (including remote or unscoped sessions) remain ineligible and are not
+treated as broken local Git metadata.
+
+Deploy only the updated gateway runtime and restart that gateway when approved.
+Keep the collector/dashboard/source/AIU configuration unchanged; health checks
+alone still do not establish Azure delivery or correct project grouping.
 
 ## Manual synthetic diagnostics
 
