@@ -86,20 +86,22 @@ values do not expand `~` or environment variables:
 }
 ```
 
-Eligible local workspaces beneath `projects_root` are discovered on each export.
-The alias combines the first folder under the root and the workspace's final
-folder: `personal/apps/demo` becomes `personal/demo`. A workspace directly
-beneath the root becomes `projects/<folder>`. Opening a subfolder as a workspace
-uses the subfolder's name.
+Each export discovers local sessions whose project resolves beneath
+`projects_root`. Aliases are `<category>/<project>`: the first folder under the
+root and the project folder's name, so `personal/apps/demo` becomes
+`personal/demo`. A project directly beneath the root becomes
+`projects/<folder>`. Non-Git workspaces use the opened workspace folder. See
+[attribution troubleshooting](troubleshooting.md#attribution) for supported
+layouts and failure reasons.
 
 Aliases expose category/project names, not absolute paths. Each component must
 be 1-63 ASCII letters, digits, dots, underscores, or hyphens; `synthetic/demo` is
-reserved. Distinct workspace paths with the same alias remain unattributed with
-`identity_conflict`. Multiple sessions in one workspace are allowed.
+reserved. Distinct projects that would share an alias remain unattributed with
+`identity_conflict`. Multiple sessions in one project are allowed.
 
-Add absolute directories to `excluded_workspaces` to exclude them and their
-descendants from attribution. Paths are resolved, so symlinks escaping the root
-are ineligible. **Exclusions do not stop collection**: those spans still pass
+Add absolute directories to `excluded_workspaces` to exclude sessions in them
+and their descendants from attribution. Paths are resolved, so symlinks escaping
+the root are ineligible. **Exclusions do not stop collection**: those spans still pass
 through as `unattributed`. Enabling collection remains a separate client choice.
 Version-1 policies retain their explicit `projects` allowlist and VS Code-only
 catalog behavior.
